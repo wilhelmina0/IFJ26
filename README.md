@@ -10,4 +10,4 @@ Implementace překladače v jazyce C ze zdrojového jazyk IFJ26 do cílového ja
 - `docs/` - dokumentace
 
 ## Build a spuštění
-doplnit
+Build a spuštění přes příkaz `make`, vyčištění build directory přes `make clean`, build + spuštění python skriptu (test.py) přes `make test`.
