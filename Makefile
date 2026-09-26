@@ -3,7 +3,7 @@ CFLAGS = -std=c99 -Wall -Wextra -Wpedantic -g
 SOURCE = src/main.c
 BUILD = build/ifj26
 
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(BUILD)
 
@@ -13,3 +13,6 @@ $(BUILD): $(SOURCE) Makefile
 
 clean:
 	rm -rf build
+
+test: $(BUILD)
+	python3 tests/test.py
