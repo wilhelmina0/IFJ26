@@ -6,7 +6,11 @@
 
 typedef enum {
     START,
-    IDENTIFIER
+    IDENTIFIER,
+    STRING,
+    STRING_ESC,
+    LINE_COMMENT,
+    BLOCK_COMMENT
 } LexerState;
 
 typedef struct {
@@ -99,6 +103,105 @@ Token nextToken() {
                     state = IDENTIFIER;
                     continue;
                 }
+                else if (c == '+') {
+                    token.type = TOKEN_PLUS;
+                    return token;
+                }
+                else if (c == '-') {
+                    token.type = TOKEN_MINUS;
+                    return token;
+                }
+                else if (c == '*') {
+                    token.type = TOKEN_MUL;
+                    return token;
+                }
+                else if (c == '/') {
+                    int nextC = getchar();
+                    if (nextC == '/') {
+                        state = LINE_COMMENT;
+                        continue;
+                    }
+                    else if (nextC == '*') {
+                        state = BLOCK_COMMENT;
+                        continue;
+                    }
+                    else {
+                        ungetc(nextC, stdin);
+                        token.type = TOKEN_DIV;
+                        return token;
+                    }
+                }
+                else if (c == '=') {
+                    int nextC = getchar();
+                    if (nextC == '=') {
+                        token.type = TOKEN_EQ;
+                        return token;
+                    } else {
+                        ungetc(nextC, stdin);
+                        token.type = TOKEN_ASSIGN;
+                        return token;
+                    }
+                }
+                else if (c == '!') {
+                    int nextC = getchar();
+                    if (nextC == '=') {
+                        token.type = TOKEN_NEQ;
+                        return token;
+                    } else {
+                        fprintf(stderr, "Lexical error on line %d: Expected '!='\n", token.lineNumber);
+                        exit(1);
+                    }
+                }
+                else if (c == '<') {
+                    int nextC = getchar();
+                    if (nextC == '=') {
+                        token.type = TOKEN_LTE;
+                        return token;
+                    } else {
+                        ungetc(nextC, stdin);
+                        token.type = TOKEN_LT;
+                        return token;
+                    }
+                }
+                else if (c == '>') {
+                    int nextC = getchar();
+                    if (nextC == '=') {
+                        token.type = TOKEN_GTE;
+                        return token;
+                    } else {
+                        ungetc(nextC, stdin);
+                        token.type = TOKEN_GT;
+                        return token;
+                    }
+                }
+                else if (c == '(') {
+                    token.type = TOKEN_LPAREN;
+                    return token;
+                }
+                else if (c == ')') {
+                    token.type = TOKEN_RPAREN;
+                    return token;
+                }
+                else if (c == ':') {
+                    token.type = TOKEN_COLON;
+                    return token;
+                }
+                else if (c == ',') {
+                    token.type = TOKEN_COMMA;
+                    return token;
+                }
+                else if (c == '.') {
+                    token.type = TOKEN_DOT;
+                    return token;
+                }
+                else if (c == ';') {
+                    token.type = TOKEN_SEMICOLON;
+                    return token;
+                }
+                else if (c == '"') {
+                    state = STRING;
+                    continue;
+                }
                 else if (isspace(c)) {
                     continue;
                 }
@@ -119,6 +222,75 @@ Token nextToken() {
                     
                     free(buffer.text);
                     return token;
+                }
+                break;
+
+            case STRING:
+                if (c == '"') {
+                    token.type = TOKEN_STRING_LITERAL;
+                    token.stringValue = strdup(buffer.text);
+                    free(buffer.text);
+                    return token;
+                }
+                else if (c == '\\') {
+                    state = STRING_ESC;
+                    continue;
+                }
+                else if (c == EOF || c == '\n') {
+                    fprintf(stderr, "Lexical error on line %d: unclosed string\n", token.lineNumber);
+                    exit(1);
+                }
+                else {
+                    appendChar(&buffer, c);
+                    continue;
+                }
+                break;
+
+            case STRING_ESC:
+                if (c == 'n') {
+                    appendChar(&buffer, '\n');
+                }
+                else if (c == 't') {
+                    appendChar(&buffer, '\t');
+                }
+                else if (c == 'r') {
+                    appendChar(&buffer, '\r');
+                }
+                else if (c == '"') {
+                    appendChar(&buffer, '"');
+                }
+                else if (c == '\\') {
+                    appendChar(&buffer, '\\');
+                }
+                else {
+                    fprintf(stderr, "Lexical error on line %d: invalid escape sequence \\%c\n", token.lineNumber, c);
+                }
+                state = STRING;
+                break;
+
+            case LINE_COMMENT:
+                if (c == '\n' || c == EOF) {
+                    ungetc(c, stdin);
+                    state = START;
+                }
+                break;
+
+            case BLOCK_COMMENT:
+                if (c == '*') {
+                    int nextC = getchar();
+                    if (nextC == '/') {
+                        state = START;
+                    }
+                    else { 
+                        ungetc(nextC, stdin);
+                    }
+                }
+                else if (c == '\n') {
+                    lineCounter++;
+                }
+                else if (c == EOF) {
+                    fprintf(stderr, "Lexical error: Unclosed block comment starting at line %d\n", token.lineNumber);
+                    exit(1); 
                 }
                 break;
 
