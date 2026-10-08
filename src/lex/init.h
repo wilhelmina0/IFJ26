@@ -7,6 +7,8 @@ typedef enum {
     TOKEN_EOF,
     TOKEN_EOL,
     TOKEN_ANNOTATION_MAIN, // @main // "@" can ONLY be used with the KW main, so we dont need a separate "@" token
+    TOKEN_INDENT,
+    TOKEN_DEDENT,
 
     //keywords
     TOKEN_KW_DEF,
