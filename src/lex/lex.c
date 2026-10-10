@@ -6,11 +6,24 @@
 
 typedef enum {
     START,
+
     IDENTIFIER,
+
+    INT,
+    DOUBLE,
+    DOUBLE_EXP,
+    
     STRING,
     STRING_ESC,
+    BLOCK_STRING,
+
+    MORE,
+    LESS,
+    SLASH,
+
     LINE_COMMENT,
-    BLOCK_COMMENT
+    BLOCK_COMMENT,
+
 } LexerState;
 
 typedef struct {
@@ -33,7 +46,7 @@ void appendChar(StringBuffer *buffer, int c) {
     buffer->text[buffer->length] = '\0';
 }
 
-TokenType findKeyword(const char *text, int lineNumber) { 
+TokenType findKeyword(const char *text, int lineNumber /*purely for error msgs*/) { //might be a bottleneck later, but should be easy to optimize by grouping these suckers
     if (strcmp(text, "def") == 0) return TOKEN_KW_DEF;
     if (strcmp(text, "do") == 0) return TOKEN_KW_DO;
     if (strcmp(text, "else") == 0) return TOKEN_KW_ELSE;
@@ -44,7 +57,6 @@ TokenType findKeyword(const char *text, int lineNumber) {
     if (strcmp(text, "val") == 0) return TOKEN_KW_VAL;
     if (strcmp(text, "var") == 0) return TOKEN_KW_VAR;
     if (strcmp(text, "while") == 0) return TOKEN_KW_WHILE;
-    
     if (strcmp(text, "Int") == 0) return TOKEN_TYPE_INT;
     if (strcmp(text, "Double") == 0) return TOKEN_TYPE_DOUBLE;
     if (strcmp(text, "String") == 0) return TOKEN_TYPE_STRING;
@@ -65,7 +77,7 @@ Token nextToken() {
     int c;
 
     StringBuffer buffer;
-    buffer.capacity = 256; 
+    buffer.capacity = 256; //maybe better smaller???
     buffer.length = 0;
     buffer.text = malloc(buffer.capacity);
     
@@ -73,7 +85,8 @@ Token nextToken() {
         c = getchar();
         
         switch (state) {
-            case START: 
+            case START: //probably redo this (or some parts of this) with a switch instead
+                //structural
                 if (c == EOF) {
                     token.type = TOKEN_EOF;
                     return token;
@@ -84,7 +97,7 @@ Token nextToken() {
                     lineCounter++;
                     return token;
                 }
-                else if (c == '@') { 
+                else if (c == '@') { //'@' can only be used with "main"
                     int nextC1 = getchar();
                     int nextC2 = getchar();
                     int nextC3 = getchar();
@@ -98,11 +111,20 @@ Token nextToken() {
                         exit(1);
                     }
                 }
+                
+                //keywords, identifiers, literals, types
                 else if (isalpha(c) || c == '_') {
                     appendChar(&buffer, c);
                     state = IDENTIFIER;
                     continue;
                 }
+                else if (isdigit(c)) {
+                    appendChar(&buffer, c);
+                    state = INT;
+                    continue;
+                }
+
+                //operators
                 else if (c == '+') {
                     token.type = TOKEN_PLUS;
                     return token;
@@ -174,6 +196,8 @@ Token nextToken() {
                         return token;
                     }
                 }
+                
+                //separators
                 else if (c == '(') {
                     token.type = TOKEN_LPAREN;
                     return token;
@@ -198,33 +222,44 @@ Token nextToken() {
                     token.type = TOKEN_SEMICOLON;
                     return token;
                 }
+
+                //straight up bullshit
                 else if (c == '"') {
-                    state = STRING;
-                    continue;
+                    int nextC1 = getchar();
+                    int nextC2 = getchar();
+                    if (nextC1 == '"' && nextC2 == '"') {
+                        state = BLOCK_STRING;
+                        continue;
+                    }
+                    else {
+                        ungetc(nextC1, stdin);
+                        ungetc(nextC2, stdin);
+                        state = STRING;
+                        continue;
+                    }
                 }
                 else if (isspace(c)) {
+                    //TODO: indent counting here
                     continue;
                 }
                 break;
-
             case IDENTIFIER:
                 if (isalnum(c) || c == '_') {
-                    appendChar(&buffer, c);
-                    continue;
-                } else {
-                    ungetc(c, stdin);
-                    
-                    token.type = findKeyword(buffer.text, token.lineNumber);
-                    
-                    if(token.type == TOKEN_ID) {
-                        token.stringValue = strdup(buffer.text);
+                        appendChar(&buffer, c);
+                        continue;
+                    } else {
+                        ungetc(c, stdin);
+                        
+                        token.type = findKeyword(buffer.text, token.lineNumber);
+                        
+                        if(token.type == TOKEN_ID) {
+                            token.stringValue = strdup(buffer.text);
+                        }
+                        
+                        free(buffer.text);
+                        return token;
                     }
-                    
-                    free(buffer.text);
-                    return token;
-                }
                 break;
-
             case STRING:
                 if (c == '"') {
                     token.type = TOKEN_STRING_LITERAL;
@@ -245,7 +280,6 @@ Token nextToken() {
                     continue;
                 }
                 break;
-
             case STRING_ESC:
                 if (c == 'n') {
                     appendChar(&buffer, '\n');
@@ -265,16 +299,129 @@ Token nextToken() {
                 else {
                     fprintf(stderr, "Lexical error on line %d: invalid escape sequence \\%c\n", token.lineNumber, c);
                 }
+
                 state = STRING;
                 break;
-
+            case BLOCK_STRING:
+                if (c == EOF) {
+                    fprintf(stderr, "Lexical error on line %d: unclosed block string\n");
+                    exit(1);
+                }
+                else if(c == '\n') {
+                    lineCounter++;
+                    appendChar(&buffer, c);
+                    continue;
+                }
+                else if (c == '"') {
+                    int nextC1 = getchar();
+                    int nextC2 = getchar();
+                    if (nextC1 == '"' && nextC2 == '"') {
+                        token.type = TOKEN_STRING_LITERAL;
+                        token.stringValue = strdup(buffer.text);
+                        free(buffer.text);
+                        return token;
+                    }
+                    else {
+                        ungetc(nextC1, stdin);
+                        ungetc(nextC2, stdin);
+                        appendChar(&buffer, c);
+                        continue;
+                    }
+                }
+                else {
+                    appendChar(&buffer, c);
+                    continue; 
+                }
+                break;
+            case INT:
+                if (isdigit(c)) {
+                    appendChar(&buffer, c);
+                    continue;
+                }
+                else if (c == '_') {
+                    //do NOT append, just get rid of it
+                    continue;
+                }
+                else if (c == '.') {
+                    appendChar(&buffer, c);
+                    state = DOUBLE;
+                    continue;
+                }
+                else if (c == 'e' || c == 'E') {
+                    appendChar(&buffer, c);
+                    state = DOUBLE_EXP;
+                    continue;
+                }
+                else {
+                    ungetc(c, stdin);
+                    token.type = TOKEN_INT_LITERAL;
+                    token.intValue = (int)strtol(buffer.text, NULL, 10);
+                    free(buffer.text);
+                    return token;
+                }
+                break;
+            case DOUBLE:
+                if (isdigit(c)) {
+                    appendChar(&buffer, c);
+                    continue;
+                }
+                else if (c == '_') {
+                    //do NOT append, just get rid of it
+                    continue;
+                }
+                else if (c == 'e' || c == 'E') {
+                    appendChar(&buffer, c);
+                    state = DOUBLE_EXP;
+                    continue;
+                }
+                else if (c == 'd' || c == 'D') {
+                    //do NOT append, just get rid of it, it's optional
+                    token.type = TOKEN_DOUBLE_LITERAL;
+                    token.doubleValue = strtod(buffer.text, NULL);
+                    free(buffer.text);
+                    return token;
+                }
+                else {
+                    ungetc(c, stdin);
+                    token.type = TOKEN_DOUBLE_LITERAL;
+                    token.doubleValue = strtod(buffer.text, NULL);
+                    free(buffer.text);
+                    return token;
+                break;
+            case DOUBLE_EXP:
+                if (isdigit(c)) {
+                    appendChar(&buffer, c);
+                    continue;
+                }
+                else if (c == '_') {
+                    //do NOT append, just get rid of it
+                    continue;
+                }
+                else if (c == 'd' || c == 'D') {
+                    //do NOT append, just get rid of it, it's optional
+                    token.type = TOKEN_DOUBLE_LITERAL;
+                    token.doubleValue = strtod(buffer.text, NULL);
+                    free(buffer.text);
+                    return token;
+                }
+                else {
+                    ungetc(c, stdin);
+                    token.type = TOKEN_DOUBLE_LITERAL;
+                    token.doubleValue = strtod(buffer.text, NULL);
+                    free(buffer.text);
+                    return token;
+                }
+                break;
             case LINE_COMMENT:
-                if (c == '\n' || c == EOF) {
+                if (c == '\n') {
+                    ungetc(c, stdin);
+                    state = START;
+                }
+                else if (c == EOF) {
                     ungetc(c, stdin);
                     state = START;
                 }
                 break;
-
             case BLOCK_COMMENT:
                 if (c == '*') {
                     int nextC = getchar();
@@ -293,9 +440,10 @@ Token nextToken() {
                     exit(1); 
                 }
                 break;
-
             default:
+                
                 break;
+            }
         }
     }
 }
