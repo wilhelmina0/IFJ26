@@ -7,6 +7,8 @@
 typedef enum {
     START,
 
+    LINE_START,
+
     IDENTIFIER,
 
     INT,
@@ -33,8 +35,13 @@ typedef struct {
 } StringBuffer;
 
 static int lineCounter = 1;
+static int spaceCounter = 0;
+static int indentStack[100] = {0};
+static int stackTop = 0;
+static int owedDedents = 0;
+static int isStartOfLine = 0;
 
-void appendChar(StringBuffer *buffer, int c) {
+static void appendChar(StringBuffer *buffer, int c) {
     if (buffer->length + 1 >= buffer->capacity) {
         buffer->capacity *= 2;
         buffer->text = realloc(buffer->text, buffer->capacity);
@@ -46,25 +53,38 @@ void appendChar(StringBuffer *buffer, int c) {
     buffer->text[buffer->length] = '\0';
 }
 
-TokenType findKeyword(const char *text, int lineNumber /*purely for error msgs*/) { //might be a bottleneck later, but should be easy to optimize by grouping these suckers
-    if (strcmp(text, "def") == 0) return TOKEN_KW_DEF;
-    if (strcmp(text, "do") == 0) return TOKEN_KW_DO;
-    if (strcmp(text, "else") == 0) return TOKEN_KW_ELSE;
-    if (strcmp(text, "if") == 0) return TOKEN_KW_IF;
-    if (strcmp(text, "import") == 0) return TOKEN_KW_IMPORT;
-    if (strcmp(text, "return") == 0) return TOKEN_KW_RETURN;
-    if (strcmp(text, "then") == 0) return TOKEN_KW_THEN;
-    if (strcmp(text, "val") == 0) return TOKEN_KW_VAL;
-    if (strcmp(text, "var") == 0) return TOKEN_KW_VAR;
-    if (strcmp(text, "while") == 0) return TOKEN_KW_WHILE;
-    if (strcmp(text, "Int") == 0) return TOKEN_TYPE_INT;
-    if (strcmp(text, "Double") == 0) return TOKEN_TYPE_DOUBLE;
-    if (strcmp(text, "String") == 0) return TOKEN_TYPE_STRING;
-    if (strcmp(text, "Unit") == 0) return TOKEN_TYPE_UNIT;
-
-    if(strcmp(text, "_") == 0) {
-        fprintf(stderr, "Lexical error on line %d, '_' itself cannot be an identifier\n", lineNumber);
-        exit(1);
+static TokenType findKeyword(const char *text, const int len, const int lineNumber /*purely for error msgs*/) {
+    switch (len) {
+        case 1:
+            if (text[0] == '_') {
+                fprintf(stderr, "Lexical error on line %d, '_' itself cannot be an identifier\n", lineNumber);
+                exit(1);
+            }
+            break;
+        case 2:
+            if (text[0] == 'd' && text[1] == 'o') return TOKEN_KW_DO;
+            if (text[0] == 'i' && text[1] == 'f') return TOKEN_KW_IF;
+            break;
+        case 3:
+            if (strcmp(text, "def") == 0) return TOKEN_KW_DEF;
+            if (strcmp(text, "val") == 0) return TOKEN_KW_VAL;
+            if (strcmp(text, "var") == 0) return TOKEN_KW_VAR;
+            if (strcmp(text, "Int") == 0) return TOKEN_TYPE_INT;
+            break;
+        case 4:
+            if (strcmp(text, "else") == 0) return TOKEN_KW_ELSE;
+            if (strcmp(text, "then") == 0) return TOKEN_KW_THEN;
+            if (strcmp(text, "Unit") == 0) return TOKEN_TYPE_UNIT;
+            break;
+        case 5:
+            if (strcmp(text, "while") == 0) return TOKEN_KW_WHILE;
+            break;
+        case 6:
+            if (strcmp(text, "import") == 0) return TOKEN_KW_IMPORT;
+            if (strcmp(text, "return") == 0) return TOKEN_KW_RETURN;
+            if (strcmp(text, "Double") == 0) return TOKEN_TYPE_DOUBLE;
+            if (strcmp(text, "String") == 0) return TOKEN_TYPE_STRING;
+            break;
     }
 
     return TOKEN_ID;
@@ -73,174 +93,222 @@ TokenType findKeyword(const char *text, int lineNumber /*purely for error msgs*/
 Token nextToken() {
     Token token;
     token.lineNumber = lineCounter;
-    LexerState state = START;
+    spaceCounter = 0;
+    LexerState state;
     int c;
 
     StringBuffer buffer;
-    buffer.capacity = 256; //maybe better smaller???
+    buffer.capacity = 256;
     buffer.length = 0;
     buffer.text = malloc(buffer.capacity);
+
+    if (owedDedents > 0) {
+        owedDedents--;
+        token.type = TOKEN_DEDENT;
+        return token;
+    }
+    if (isStartOfLine == 1) {
+        state = LINE_START;
+    }
+    else {
+        state = START;
+    }
+
     
     while (1) {
         c = getchar();
         
         switch (state) {
-            case START: //probably redo this (or some parts of this) with a switch instead
-                //structural
-                if (c == EOF) {
-                    token.type = TOKEN_EOF;
-                    return token;
+            case START:
+                switch (c) {
+                    // Structural
+                    case EOF:
+                        token.type = TOKEN_EOF;
+                        return token;
+                    case '\n':
+                        token.type = TOKEN_EOL;
+                        token.lineNumber = lineCounter;
+                        lineCounter++;
+                        isStartOfLine = 1;
+                        return token;
+                    case '@':{  //'@' can only be used with "main"
+                        int nextC1 = getchar();
+                        int nextC2 = getchar();
+                        int nextC3 = getchar();
+                        int nextC4 = getchar();
+                        
+                        if (nextC1 == 'm' && nextC2 == 'a' && nextC3 == 'i' && nextC4 == 'n') {
+                            token.type = TOKEN_ANNOTATION_MAIN;
+                            return token;
+                        } else {
+                            fprintf(stderr, "Lexical error on line %d: Expected '@main'\n", token.lineNumber);
+                            exit(1);
+                        }
+                    }
+
+                    //operators
+                    case '+': token.type = TOKEN_PLUS; return token;
+                    case '-': token.type = TOKEN_MINUS; return token;
+                    case '*': token.type = TOKEN_MUL; return token;
+                    case '/': {
+                        int nextC = getchar();
+                        if (nextC == '/') {
+                            state = LINE_COMMENT;
+                            continue;
+                        } else if (nextC == '*') {
+                            state = BLOCK_COMMENT;
+                            continue;
+                        } else {
+                            ungetc(nextC, stdin);
+                            token.type = TOKEN_DIV;
+                            return token;
+                        }
+                    }
+                    case '=': {
+                        int nextC = getchar();
+                        if (nextC == '=') {
+                            token.type = TOKEN_EQ;
+                            return token;
+                        } else {
+                            ungetc(nextC, stdin);
+                            token.type = TOKEN_ASSIGN;
+                            return token;
+                        }
+                    }
+                    case '!': {
+                        int nextC = getchar();
+                        if (nextC == '=') {
+                            token.type = TOKEN_NEQ;
+                            return token;
+                        } else {
+                            fprintf(stderr, "Lexical error on line %d: Expected '!='\n", token.lineNumber);
+                            exit(1);
+                        }
+                    }
+                    case '<': {
+                        int nextC = getchar();
+                        if (nextC == '=') {
+                            token.type = TOKEN_LTE;
+                            return token;
+                        } else {
+                            ungetc(nextC, stdin);
+                            token.type = TOKEN_LT;
+                            return token;
+                        }
+                    }
+                    case '>': {
+                        int nextC = getchar();
+                        if (nextC == '=') {
+                            token.type = TOKEN_GTE;
+                            return token;
+                        } else {
+                            ungetc(nextC, stdin);
+                            token.type = TOKEN_GT;
+                            return token;
+                        }
+                    }
+
+                    //separators
+                    case '(': token.type = TOKEN_LPAREN; return token;
+                    case ')': token.type = TOKEN_RPAREN; return token;
+                    case ':': token.type = TOKEN_COLON; return token;
+                    case ',': token.type = TOKEN_COMMA; return token;
+                    case '.': token.type = TOKEN_DOT; return token;
+                    case ';': token.type = TOKEN_SEMICOLON; return token;
+                    
+                    //strings
+                    case '"': {
+                        int nextC1 = getchar();
+                        int nextC2 = getchar();
+                        if (nextC1 == '"' && nextC2 == '"') {
+                            state = BLOCK_STRING;
+                            continue;
+                        } else {
+                            ungetc(nextC2, stdin);
+                            ungetc(nextC1, stdin);
+                            state = STRING;
+                            continue;
+                        }
+                    }
+                    
+                    //keywords, identifiers, all that
+                    default:
+                        if (isalpha(c) || c == '_') {
+                            appendChar(&buffer, c);
+                            state = IDENTIFIER;
+                            continue;
+                        } 
+                        else if (isdigit(c)) {
+                            appendChar(&buffer, c);
+                            state = INT;
+                            continue;
+                        }
+                        else if (isspace(c)) {
+                            //just throw this away
+                            continue;
+                        }
+                        else {
+                            fprintf(stderr, "Lexical error on line %d: Unknown character '%c'\n", token.lineNumber, c);
+                            exit(1);
+                        }
+                }
+                break;
+            case LINE_START:
+                if (c == ' ') {
+                    spaceCounter++;
+                    continue;
+                }
+                else if (c == '\t') {
+                    fprintf(stderr, "Lexical error on line %d: Tabs are not allowed for indentation\n", token.lineNumber);
+                    exit(1);
                 }
                 else if (c == '\n') {
-                    token.type = TOKEN_EOL;
-                    token.lineNumber = lineCounter;
                     lineCounter++;
-                    return token;
+                    spaceCounter = 0;
+                    continue; 
                 }
-                else if (c == '@') { //'@' can only be used with "main"
-                    int nextC1 = getchar();
-                    int nextC2 = getchar();
-                    int nextC3 = getchar();
-                    int nextC4 = getchar();
-                    
-                    if (nextC1 == 'm' && nextC2 == 'a' && nextC3 == 'i' && nextC4 == 'n') {
-                        token.type = TOKEN_ANNOTATION_MAIN;
+                else if (c == EOF) {
+                    if (stackTop > 0) {
+                        owedDedents = stackTop;
+                        stackTop = 0;
+                        ungetc(c, stdin); 
+                        
+                        owedDedents--;
+                        token.type = TOKEN_DEDENT;
                         return token;
-                    } else {
-                        fprintf(stderr, "Lexical error on line %d: Expected '@main'\n", token.lineNumber);
-                        exit(1);
                     }
-                }
-                
-                //keywords, identifiers, literals, types
-                else if (isalpha(c) || c == '_') {
-                    appendChar(&buffer, c);
-                    state = IDENTIFIER;
+                    state = START;
                     continue;
                 }
-                else if (isdigit(c)) {
-                    appendChar(&buffer, c);
-                    state = INT;
-                    continue;
-                }
+                else {
+                    isStartOfLine = 0;
+                    ungetc(c, stdin);
 
-                //operators
-                else if (c == '+') {
-                    token.type = TOKEN_PLUS;
-                    return token;
-                }
-                else if (c == '-') {
-                    token.type = TOKEN_MINUS;
-                    return token;
-                }
-                else if (c == '*') {
-                    token.type = TOKEN_MUL;
-                    return token;
-                }
-                else if (c == '/') {
-                    int nextC = getchar();
-                    if (nextC == '/') {
-                        state = LINE_COMMENT;
-                        continue;
+                    if (spaceCounter > indentStack[stackTop]) {
+                        stackTop++;
+                        indentStack[stackTop] = spaceCounter;
+                        token.type = TOKEN_INDENT;
+                        return token;
                     }
-                    else if (nextC == '*') {
-                        state = BLOCK_COMMENT;
-                        continue;
+                    else if (spaceCounter < indentStack[stackTop]) {
+                        while (stackTop > 0 && spaceCounter < indentStack[stackTop]) {
+                            stackTop--;
+                            owedDedents++;
+                        }
+
+                        if (spaceCounter != indentStack[stackTop]) {
+                            fprintf(stderr, "Lexical error on line %d: Invalid dedent level\n", token.lineNumber);
+                            exit(1);
+                        }
+
+                        owedDedents--;
+                        token.type = TOKEN_DEDENT;
+                        return token;
                     }
                     else {
-                        ungetc(nextC, stdin);
-                        token.type = TOKEN_DIV;
-                        return token;
-                    }
-                }
-                else if (c == '=') {
-                    int nextC = getchar();
-                    if (nextC == '=') {
-                        token.type = TOKEN_EQ;
-                        return token;
-                    } else {
-                        ungetc(nextC, stdin);
-                        token.type = TOKEN_ASSIGN;
-                        return token;
-                    }
-                }
-                else if (c == '!') {
-                    int nextC = getchar();
-                    if (nextC == '=') {
-                        token.type = TOKEN_NEQ;
-                        return token;
-                    } else {
-                        fprintf(stderr, "Lexical error on line %d: Expected '!='\n", token.lineNumber);
-                        exit(1);
-                    }
-                }
-                else if (c == '<') {
-                    int nextC = getchar();
-                    if (nextC == '=') {
-                        token.type = TOKEN_LTE;
-                        return token;
-                    } else {
-                        ungetc(nextC, stdin);
-                        token.type = TOKEN_LT;
-                        return token;
-                    }
-                }
-                else if (c == '>') {
-                    int nextC = getchar();
-                    if (nextC == '=') {
-                        token.type = TOKEN_GTE;
-                        return token;
-                    } else {
-                        ungetc(nextC, stdin);
-                        token.type = TOKEN_GT;
-                        return token;
-                    }
-                }
-                
-                //separators
-                else if (c == '(') {
-                    token.type = TOKEN_LPAREN;
-                    return token;
-                }
-                else if (c == ')') {
-                    token.type = TOKEN_RPAREN;
-                    return token;
-                }
-                else if (c == ':') {
-                    token.type = TOKEN_COLON;
-                    return token;
-                }
-                else if (c == ',') {
-                    token.type = TOKEN_COMMA;
-                    return token;
-                }
-                else if (c == '.') {
-                    token.type = TOKEN_DOT;
-                    return token;
-                }
-                else if (c == ';') {
-                    token.type = TOKEN_SEMICOLON;
-                    return token;
-                }
-
-                //straight up bullshit
-                else if (c == '"') {
-                    int nextC1 = getchar();
-                    int nextC2 = getchar();
-                    if (nextC1 == '"' && nextC2 == '"') {
-                        state = BLOCK_STRING;
+                        state = START;
                         continue;
                     }
-                    else {
-                        ungetc(nextC1, stdin);
-                        ungetc(nextC2, stdin);
-                        state = STRING;
-                        continue;
-                    }
-                }
-                else if (isspace(c)) {
-                    //TODO: indent counting here
-                    continue;
                 }
                 break;
             case IDENTIFIER:
@@ -250,7 +318,7 @@ Token nextToken() {
                     } else {
                         ungetc(c, stdin);
                         
-                        token.type = findKeyword(buffer.text, token.lineNumber);
+                        token.type = findKeyword(buffer.text, buffer.length, token.lineNumber);
                         
                         if(token.type == TOKEN_ID) {
                             token.stringValue = strdup(buffer.text);
@@ -322,8 +390,8 @@ Token nextToken() {
                         return token;
                     }
                     else {
-                        ungetc(nextC1, stdin);
                         ungetc(nextC2, stdin);
+                        ungetc(nextC1, stdin);
                         appendChar(&buffer, c);
                         continue;
                     }

@@ -66,7 +66,7 @@ typedef struct TOKEN
     };
 
     int lineNumber;
-    //int col_number; //we could have prettier error msgs with this but it would slow us down
+    //int col_number; //we could have prettier error msgs with this but it would slow us down, pointless...
 } Token;
 
 Token nextToken();
