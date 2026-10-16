@@ -13,6 +13,7 @@
 #define AST_H
 
 #include "stdbool.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,6 +21,7 @@
 typedef enum {
     AST_PROGRAM,
     AST_FUNCTION,
+    AST_CALL,
     AST_BLOCK,
 
     AST_ASSIGN,
@@ -68,8 +70,11 @@ struct Node{
          } function;
 
          struct {
+             char *id;
+         } call;
+
+         struct {
              char *name;
-             Node *value;
          } assignment;
      } data;
 };
@@ -77,6 +82,8 @@ struct Node{
 // ast constructor
 Node *createAST(NodeType type, int line);
 int addChild(Node *parent, Node *child);
+
+void printAST(Node *node, size_t depth);
 
 // destructor
 void destroyAST(Node *ast);
