@@ -1,7 +1,7 @@
 /**
 * @file init.h
- * @brief Structure of parser
  *
+ * @brief Structure of parser
  *
  *
  * @authors
@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 typedef struct {
     Token currentToken;
@@ -27,6 +28,9 @@ typedef struct {
     Error error;
 } Parser;
 
+void freeToken(Token *token);   // for tokens that use strdup()
+void synClean(Parser *parser);  // when parser is finished
+
 void parserInit(Parser *parser);  // sets the current token w/ nextToken() from lex
 void parseNext(Parser *parser);   // moves onto the next token
 
@@ -34,12 +38,15 @@ bool checkType(Parser *parser, TokenType type);                // checks the tok
 bool same(Parser *parser, TokenType type);                      // checks type moves onto next
 bool want(Parser *parser, TokenType type, const char *message); // wants certain token –> error otherwise
 
+// copies string values for ast
+char *copyStr(const char *str);
+
 bool parseProlog(Parser *parser); // checks prolog
 Node *parseProgram(Parser *parser); // checks prolog, functions and EOF
 
 bool parseFunction(Parser *parser); //(temporary bool before ast ops are finished;D)
-Node *parseStatement(Parser *parser);
-Node *parsePrint(Parser *parser);
+Node *parseCall(Parser *parser);    // for function calls (print, ...)
+Node *parseStatement(Parser *parser); // TODO: pokud najdes typ id vrat parseCall jinak null
 Node *parseLiteral(Parser *parser);
 
 #endif //SYN_INIT_H
