@@ -10,6 +10,8 @@
  *
  */
 
+//upozornění pro developera tady toho skvělýho parseru: mallocovaný data z tokenů musíš freeovat ty :DDD
+
 #include "init.h"
 
 
