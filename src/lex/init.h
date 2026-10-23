@@ -56,6 +56,36 @@ typedef enum {
     TOKEN_SEMICOLON, // ;
 } TokenType;
 
+typedef enum {
+    START,
+
+    LINE_START,
+
+    IDENTIFIER,
+
+    INT,
+    DOUBLE,
+    DOUBLE_EXP,
+    
+    STRING,
+    STRING_ESC,
+    BLOCK_STRING,
+
+    MORE,
+    LESS,
+    SLASH,
+
+    LINE_COMMENT,
+    BLOCK_COMMENT,
+
+} LexerState;
+
+typedef struct {
+    char *text;
+    int length;
+    int capacity;
+} StringBuffer;
+
 typedef struct TOKEN
 {
     TokenType type;
@@ -63,7 +93,7 @@ typedef struct TOKEN
         int intValue;
         double doubleValue;
         char *stringValue;
-    };
+    } val;
 
     int lineNumber;
     //int col_number; //we could have prettier error msgs with this but it would slow us down, pointless...

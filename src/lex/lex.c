@@ -1,53 +1,26 @@
+#define _POSIX_C_SOURCE 200809L //so the strdup works if we use C99
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
 #include "init.h"
 
-typedef enum {
-    START,
-
-    LINE_START,
-
-    IDENTIFIER,
-
-    INT,
-    DOUBLE,
-    DOUBLE_EXP,
-    
-    STRING,
-    STRING_ESC,
-    BLOCK_STRING,
-
-    MORE,
-    LESS,
-    SLASH,
-
-    LINE_COMMENT,
-    BLOCK_COMMENT,
-
-} LexerState;
-
-typedef struct {
-    char *text;
-    int length;
-    int capacity;
-} StringBuffer;
-
 static int lineCounter = 1;
 static int spaceCounter = 0;
 static int indentStack[100] = {0};
 static int stackTop = 0;
 static int owedDedents = 0;
-static int isStartOfLine = 0;
+static int isStartOfLine = 1;
 
 static void appendChar(StringBuffer *buffer, int c) {
-    if (buffer->length + 1 >= buffer->capacity) {
+    if (buffer->text == NULL) {
+        buffer->capacity = 64;
+        buffer->text = malloc(buffer->capacity);
+        if (buffer->text == NULL) exit(99);
+    } else if (buffer->length + 1 >= buffer->capacity) {
         buffer->capacity *= 2;
         buffer->text = realloc(buffer->text, buffer->capacity);
-        if (buffer->text == NULL) {
-            exit(99);
-        }
+        if (buffer->text == NULL) exit(99);
     }
     buffer->text[buffer->length++] = (char) c;
     buffer->text[buffer->length] = '\0';
@@ -98,9 +71,9 @@ Token nextToken() {
     int c;
 
     StringBuffer buffer;
-    buffer.capacity = 256;
+    buffer.capacity = 0;
     buffer.length = 0;
-    buffer.text = malloc(buffer.capacity);
+    buffer.text = NULL;
 
     if (owedDedents > 0) {
         owedDedents--;
@@ -219,12 +192,18 @@ Token nextToken() {
                     //strings
                     case '"': {
                         int nextC1 = getchar();
-                        int nextC2 = getchar();
-                        if (nextC1 == '"' && nextC2 == '"') {
-                            state = BLOCK_STRING;
-                            continue;
+                        if (nextC1 == '"') {
+                            int nextC2 = getchar();
+                            if (nextC2 == '"') {
+                                state = BLOCK_STRING;
+                                continue;
+                            } else {
+                                ungetc(nextC2, stdin);
+                                token.type = TOKEN_STRING_LITERAL;
+                                token.val.stringValue = strdup("");
+                                return token;
+                            }
                         } else {
-                            ungetc(nextC2, stdin);
                             ungetc(nextC1, stdin);
                             state = STRING;
                             continue;
@@ -266,6 +245,18 @@ Token nextToken() {
                     lineCounter++;
                     spaceCounter = 0;
                     continue; 
+                }
+                else if (c == '/') {
+                    int nextC = getchar();
+                    if (nextC == '/') {
+                        while ((c = getchar()) != '\n' && c != EOF);
+                        if (c == '\n') lineCounter++;
+                        spaceCounter = 0;
+                        if (c == EOF) ungetc(c, stdin);
+                        continue;
+                    } else {
+                        ungetc(nextC, stdin);
+                    }
                 }
                 else if (c == EOF) {
                     if (stackTop > 0) {
@@ -321,7 +312,7 @@ Token nextToken() {
                         token.type = findKeyword(buffer.text, buffer.length, token.lineNumber);
                         
                         if(token.type == TOKEN_ID) {
-                            token.stringValue = strdup(buffer.text);
+                            token.val.stringValue = strdup(buffer.text);
                         }
                         
                         free(buffer.text);
@@ -331,7 +322,7 @@ Token nextToken() {
             case STRING:
                 if (c == '"') {
                     token.type = TOKEN_STRING_LITERAL;
-                    token.stringValue = strdup(buffer.text);
+                    token.val.stringValue = buffer.text ? strdup(buffer.text) : strdup("");
                     free(buffer.text);
                     return token;
                 }
@@ -366,13 +357,14 @@ Token nextToken() {
                 }
                 else {
                     fprintf(stderr, "Lexical error on line %d: invalid escape sequence \\%c\n", token.lineNumber, c);
+                    exit(1);
                 }
 
                 state = STRING;
                 break;
             case BLOCK_STRING:
                 if (c == EOF) {
-                    fprintf(stderr, "Lexical error on line %d: unclosed block string\n");
+                    fprintf(stderr, "Lexical error on line %d: unclosed block string\n", token.lineNumber);
                     exit(1);
                 }
                 else if(c == '\n') {
@@ -382,17 +374,21 @@ Token nextToken() {
                 }
                 else if (c == '"') {
                     int nextC1 = getchar();
-                    int nextC2 = getchar();
-                    if (nextC1 == '"' && nextC2 == '"') {
-                        token.type = TOKEN_STRING_LITERAL;
-                        token.stringValue = strdup(buffer.text);
-                        free(buffer.text);
-                        return token;
-                    }
-                    else {
+                    if (nextC1 == '"') {
+                        int nextC2 = getchar();
+                        if (nextC2 == '"') {
+                            token.type = TOKEN_STRING_LITERAL;
+                            token.val.stringValue = buffer.text ? strdup(buffer.text) : strdup("");
+                            free(buffer.text);
+                            return token;
+                        }
                         ungetc(nextC2, stdin);
+                        appendChar(&buffer, '"');
+                        appendChar(&buffer, '"');
+                        continue;
+                    } else {
                         ungetc(nextC1, stdin);
-                        appendChar(&buffer, c);
+                        appendChar(&buffer, '"');
                         continue;
                     }
                 }
@@ -423,7 +419,7 @@ Token nextToken() {
                 else {
                     ungetc(c, stdin);
                     token.type = TOKEN_INT_LITERAL;
-                    token.intValue = (int)strtol(buffer.text, NULL, 10);
+                    token.val.intValue = (int)strtol(buffer.text, NULL, 10);
                     free(buffer.text);
                     return token;
                 }
@@ -445,16 +441,17 @@ Token nextToken() {
                 else if (c == 'd' || c == 'D') {
                     //do NOT append, just get rid of it, it's optional
                     token.type = TOKEN_DOUBLE_LITERAL;
-                    token.doubleValue = strtod(buffer.text, NULL);
+                    token.val.doubleValue = strtod(buffer.text, NULL);
                     free(buffer.text);
                     return token;
                 }
                 else {
                     ungetc(c, stdin);
                     token.type = TOKEN_DOUBLE_LITERAL;
-                    token.doubleValue = strtod(buffer.text, NULL);
+                    token.val.doubleValue = strtod(buffer.text, NULL);
                     free(buffer.text);
                     return token;
+                }
                 break;
             case DOUBLE_EXP:
                 if (isdigit(c)) {
@@ -468,14 +465,14 @@ Token nextToken() {
                 else if (c == 'd' || c == 'D') {
                     //do NOT append, just get rid of it, it's optional
                     token.type = TOKEN_DOUBLE_LITERAL;
-                    token.doubleValue = strtod(buffer.text, NULL);
+                    token.val.doubleValue = strtod(buffer.text, NULL);
                     free(buffer.text);
                     return token;
                 }
                 else {
                     ungetc(c, stdin);
                     token.type = TOKEN_DOUBLE_LITERAL;
-                    token.doubleValue = strtod(buffer.text, NULL);
+                    token.val.doubleValue = strtod(buffer.text, NULL);
                     free(buffer.text);
                     return token;
                 }
@@ -511,7 +508,6 @@ Token nextToken() {
             default:
                 
                 break;
-            }
         }
     }
 }
