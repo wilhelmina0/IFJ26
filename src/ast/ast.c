@@ -58,6 +58,7 @@ void destroyAST(Node *node) {
 
         case AST_ASSIGN:
             free(node->data.assignment.name);
+            free(node->data.assignment.value);
             break;
 
         case AST_FUNCTION:

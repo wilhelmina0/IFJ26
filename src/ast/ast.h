@@ -12,6 +12,8 @@
 #ifndef AST_H
 #define AST_H
 
+#include "../lex/init.h"
+
 #include "stdbool.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +36,8 @@ typedef enum {
 
     AST_BINARY
 } NodeType;
+
+
 
 // structure of AST node
 typedef struct Node Node;
@@ -75,9 +79,17 @@ struct Node{
 
          struct {
              char *name;
+             Node *value;
          } assignment;
+
+         struct {
+             TokenType op;
+             Node *left, *right;
+         } binary;
+
      } data;
 };
+
 
 // ast constructor
 Node *createAST(NodeType type, int line);
