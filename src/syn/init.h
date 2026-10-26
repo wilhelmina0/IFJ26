@@ -41,12 +41,53 @@ bool want(Parser *parser, TokenType type, const char *message); // wants certain
 // copies string values for ast
 char *copyStr(const char *str);
 
-bool parseProlog(Parser *parser); // checks prolog
-Node *parseProgram(Parser *parser); // checks prolog, functions and EOF
+bool parseProlog(Parser *parser);       // checks prolog
+Node *parseProgram(Parser *parser);     // checks prolog, functions and EOF
 
-bool parseFunction(Parser *parser); //(temporary bool before ast ops are finished;D)
-Node *parseCall(Parser *parser);    // for function calls (print, ...)
-Node *parseStatement(Parser *parser); // TODO: pokud najdes typ id vrat parseCall jinak null
+bool parseFunction(Parser *parser);           //(temporary bool before ast ops are finished;D)
+Node *parseCall(Parser *parser, Node *id);    // for function calls (print, ...)
+Node *parseExpression(Parser *parser); // výrazy
+Node *parseAssignment(Parser *parser, Node *id); // přiřazení
+
+Node *parseStatement(Parser *parser);
+
 Node *parseLiteral(Parser *parser);
+Node *parseTerm(Parser *parser);
+Node *parseId(Parser *parser);
+
+/* ======================== PRECEDENCE ========================== */
+// for expressions
+typedef enum {
+    OPERAND,
+    ADD_SUB,
+    MUL_DIV,
+    LPAREN,
+    RPAREN,
+    END, // aka $ (end of expression)
+    EXPR, // aka E vyraz
+    BORDER, // hranice
+} OpSymbol;
+
+typedef struct {
+    OpSymbol symbol;
+    TokenType op;
+    Node *node;
+    int line;
+} StackEl;
+
+typedef struct {
+    StackEl *el;
+    int top; // pocet polozek, index vrcholu stacku el[top-1]
+    size_t capacity;
+    Error error;
+} Stack;
+
+// stack operations
+void initStack(Stack *stack);
+bool pushStack(Stack *stack, StackEl el);
+bool popStack(Stack *stack);
+StackEl *topStack(Stack *stack);
+
+bool shiftStack(Parser *parser, Stack *stack, char action, OpSymbol symbol, size_t termIdx);
 
 #endif //SYN_INIT_H
