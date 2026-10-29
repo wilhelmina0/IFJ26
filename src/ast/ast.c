@@ -11,6 +11,14 @@
 
 #include "ast.h"
 
+/**
+ * @brief Creates AST node of desired type.
+ *
+ * @param type The wanted AST node type.
+ * @param line Line number
+ *
+ * @return created node
+ */
 Node *createAST(NodeType type, int line) {
     Node *node = malloc(sizeof(Node));
 
@@ -28,6 +36,14 @@ Node *createAST(NodeType type, int line) {
     return node;
 }
 
+/**
+ * @brief Adds a child node to parent.
+ *
+ * @param parent pointer on parent node
+ * @param child pointer on child node
+ *
+ * @return 0 on success, 1 on faiů
+ */
 int addChild(Node *parent, Node *child) {
     if(!parent || !child) return 0;
 
@@ -44,6 +60,11 @@ int addChild(Node *parent, Node *child) {
     return 1;
 }
 
+/**
+ * @brief Destroys AST node.
+ *
+ * @param node pointer to the node we want to destroy
+ */
 void destroyAST(Node *node) {
     if(!node) return;
 
@@ -82,6 +103,12 @@ void destroyAST(Node *node) {
     free(node);
 }
 
+/**
+ * @brief Prints AST nodes.
+ *
+ * @param node
+ * @param depth fo better visual representation
+ */
 void printAST(Node *node, size_t depth) {
     if(!node) return;
     for (size_t i = 0; i < depth; i++) printf("  ");

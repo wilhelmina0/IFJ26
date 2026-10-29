@@ -37,8 +37,6 @@ typedef enum {
     AST_BINARY
 } NodeType;
 
-
-
 // structure of AST node
 typedef struct Node Node;
 struct Node{
@@ -46,7 +44,7 @@ struct Node{
      NodeType type;
      int line;
 
-     Node **children; // pouzivat pro uzly s promenlivym poctem potomku
+     Node **children; // for nodes with variable child count
      size_t childCount;
      size_t childCapacity;
 
@@ -95,9 +93,8 @@ struct Node{
 Node *createAST(NodeType type, int line);
 int addChild(Node *parent, Node *child);
 
-void printAST(Node *node, size_t depth);
-
 // destructor
 void destroyAST(Node *ast);
 
+void printAST(Node *node, size_t depth);
 #endif //AST_H
