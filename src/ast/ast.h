@@ -12,7 +12,10 @@
 #ifndef AST_H
 #define AST_H
 
+#include "../lex/init.h"
+
 #include "stdbool.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,6 +23,7 @@
 typedef enum {
     AST_PROGRAM,
     AST_FUNCTION,
+    AST_CALL,
     AST_BLOCK,
 
     AST_ASSIGN,
@@ -40,7 +44,7 @@ struct Node{
      NodeType type;
      int line;
 
-     Node **children; // pouzivat pro uzly s promenlivym poctem potomku
+     Node **children; // for nodes with variable child count
      size_t childCount;
      size_t childCapacity;
 
@@ -68,11 +72,22 @@ struct Node{
          } function;
 
          struct {
+             char *id;
+         } call;
+
+         struct {
              char *name;
              Node *value;
          } assignment;
+
+         struct {
+             TokenType op;
+             Node *left, *right;
+         } binary;
+
      } data;
 };
+
 
 // ast constructor
 Node *createAST(NodeType type, int line);
@@ -81,4 +96,5 @@ int addChild(Node *parent, Node *child);
 // destructor
 void destroyAST(Node *ast);
 
+void printAST(Node *node, size_t depth);
 #endif //AST_H

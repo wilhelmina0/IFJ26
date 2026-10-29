@@ -4,6 +4,7 @@
  *
  * Defines input and internal compiler errors
  * used across compiler mudules.
+ *
  * @authors
  * - Bára Wilhelmová(xwilheb00)
  *
@@ -11,6 +12,7 @@
 
 #ifndef ERROR_H
 #define ERROR_H
+#include <stdio.h>
 
 typedef enum {
     SUCCESS,
@@ -28,6 +30,19 @@ typedef enum {
 typedef struct {
     ErrorCode code;
     const char *message;
+    int line;
 } Error;
+
+// inline so there is no need for error.c
+static inline void handleError(Error *err, ErrorCode code, const char *message, int line) {
+    err->code = code;
+    err->message = message;
+    err->line = line;
+}
+
+// for main
+static inline void printError(Error *err) {
+    fprintf(stderr, "Error %d (line: %d): %s\n",(int)err->code, err->line, err->message);
+}
 
 #endif //ERROR_H

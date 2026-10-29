@@ -11,6 +11,14 @@
 
 #include "ast.h"
 
+/**
+ * @brief Creates AST node of desired type.
+ *
+ * @param type The wanted AST node type.
+ * @param line Line number
+ *
+ * @return created node
+ */
 Node *createAST(NodeType type, int line) {
     Node *node = malloc(sizeof(Node));
 
@@ -28,6 +36,14 @@ Node *createAST(NodeType type, int line) {
     return node;
 }
 
+/**
+ * @brief Adds a child node to parent.
+ *
+ * @param parent pointer on parent node
+ * @param child pointer on child node
+ *
+ * @return 0 on success, 1 on faiů
+ */
 int addChild(Node *parent, Node *child) {
     if(!parent || !child) return 0;
 
@@ -44,6 +60,11 @@ int addChild(Node *parent, Node *child) {
     return 1;
 }
 
+/**
+ * @brief Destroys AST node.
+ *
+ * @param node pointer to the node we want to destroy
+ */
 void destroyAST(Node *node) {
     if(!node) return;
 
@@ -58,17 +79,75 @@ void destroyAST(Node *node) {
 
         case AST_ASSIGN:
             free(node->data.assignment.name);
+            free(node->data.assignment.value);
+            break;
+
+        case AST_FUNCTION:
+            free(node->data.function.id);
+            break;
+
+        case AST_CALL:
+            free(node->data.call.id);
             break;
 
         default:
             break;
     }
 
-    // postupny destroy vsech children
+    // recursive destroy of all children
     for(size_t i = 0; i < node->childCount; i++) {
         destroyAST(node->children[i]);
     }
 
     free(node->children);
     free(node);
+}
+
+/**
+ * @brief Prints AST nodes.
+ *
+ * @param node
+ * @param depth fo better visual representation
+ */
+void printAST(Node *node, size_t depth) {
+    if(!node) return;
+    for (size_t i = 0; i < depth; i++) printf("  ");
+
+    switch(node->type) {
+        case AST_PROGRAM:
+            printf("PROGRAM");
+            break;
+        case AST_FUNCTION:
+            printf("FUNCTION: %s", node->data.function.id);
+            break;
+        case AST_CALL:
+            printf("CALL: %s", node->data.call.id);
+            break;
+        case AST_IDENTIFIER:
+            printf("IDENTIFIER: %s", node->data.identifier.id);
+        case AST_STRING:
+            printf("STRING: \"%s\"", node->data.stringLiteral.string);
+            break;
+        case AST_DOUBLE:
+            printf("DOUBLE: %g", node->data.doubleLiteral.value);
+            break;
+        case AST_INT:
+            printf("INT: %d", node->data.intLiteral.value);
+            break;
+        case AST_ASSIGN:
+            printf("ASSIGN");
+            break;
+        case AST_BLOCK:
+            printf("BLOCK");
+            break;
+
+        default:
+            printf("UNKNOWN");
+            break;
+    }
+    printf(" (line: %d)\n", (int)node->line);
+    // recursive node print
+    for (size_t i = 0; i < node->childCount; i++) {
+        printAST(node->children[i], depth + 1);
+    }
 }
