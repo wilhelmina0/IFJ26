@@ -13,21 +13,29 @@
 
 #include "init.h"
 
-// precedence stack
+/* ------------------------ STACK OPERATIONS --------------------- */
+// stack initialization
 void initStack(Stack *stack) {
     stack->el = NULL;
     stack->top = 0;
     stack->capacity = 0;
 }
 
+/**
+ * @brief Inserts element on top of initialized stack.
+ *
+ * @param stack
+ * @param el element we want to push to stack
+ * @return true on success else false
+ */
 bool pushStack(Stack *stack, StackEl el) {
     if (stack->top >= stack->capacity) {
         size_t newCap = stack->capacity;
 
         if (newCap == 0) {
-            newCap = 8;
+            newCap = 8; // default size
         } else {
-            newCap *= 2;
+            newCap *= 2; // double existing capacity
         }
 
         StackEl *tmp = realloc(stack->el, newCap * sizeof(el));
@@ -41,6 +49,12 @@ bool pushStack(Stack *stack, StackEl el) {
     return true;
 }
 
+/**
+ * @brief Pops element from top of stack.
+ *
+ * @param stack
+ * @return true on success else false
+ */
 bool popStack(Stack *stack) {
     if (stack->top > 0) {
         stack->top--;
@@ -49,6 +63,12 @@ bool popStack(Stack *stack) {
     return false;
 }
 
+/**
+ * @brief Returns the element on top of nonempty stack
+ *
+ * @param stack
+ * @return element else NULL
+ */
 StackEl *topStack(Stack *stack) {
     if (stack->top == 0) {
         // parser musi zavolat error!!!
@@ -57,6 +77,14 @@ StackEl *topStack(Stack *stack) {
     return &stack->el[stack->top - 1];
 }
 
+/**
+ * @brief Inserts a border next to the terminal that's closest to the top of the stack.
+ *
+ * @param stack
+ * @param termIdx index of the closest terminal
+ * @param line
+ * @return true on success else false
+ */
 bool insertBorder(Stack *stack, size_t termIdx, int line) {
     StackEl border = {.symbol = BORDER, .node = NULL, .line = line};
 
@@ -71,7 +99,12 @@ bool insertBorder(Stack *stack, size_t termIdx, int line) {
     return true;
 }
 
-
+/* ============================ PARSER =============================== */
+/**
+ * @brief Free() for token_id and string (needed because of strdup allocation in lex).
+ *
+ * @param token token to be destroyed
+ */
 void freeToken(Token *token) {
     if (!token) return;
 
@@ -88,12 +121,11 @@ void freeToken(Token *token) {
     token->stringValue = NULL;
 }
 
-// lex dava syn vlastnictvi -> nutno vycistit tokeny po syntakticke analyze
-void synClean(Parser *parser) {
-    freeToken(&parser->previousToken);
-    freeToken(&parser->currentToken);
-}
-
+/**
+ * @brief Initializes parser with default values.
+ *
+ * @param parser
+ */
 void parserInit(Parser *parser) {
     parser->error.code =  SUCCESS;
     parser->error.message = "";
@@ -104,6 +136,17 @@ void parserInit(Parser *parser) {
     parser->currentToken = nextToken();
 }
 
+// syn cleanup - lex transfers ownership -> syn has to free tokens
+void synClean(Parser *parser) {
+    freeToken(&parser->previousToken);
+    freeToken(&parser->currentToken);
+}
+
+/**
+ * @brief Moves from current token onto the next by calling nextToken().
+ *
+ * @param parser
+ */
 void parseNext(Parser *parser){
     freeToken(&parser->previousToken);
 
@@ -112,11 +155,24 @@ void parseNext(Parser *parser){
 }
 
 // parser utils
+/**
+ * @brief Compares current token type with the desired type.
+ *
+ * @param parser
+ * @param type desired token type
+ * @return true on success else false
+ */
 bool checkType(Parser *parser, TokenType type) {
     return parser->currentToken.type == type;
 }
 
-// move if u found desired token
+/**
+ * @brief Compares token type and moves onto the next.
+ *
+ * @param parser
+ * @param type
+ * @return true on success else false
+ */
 bool same(Parser *parser, TokenType type) {
     if (!checkType(parser, type)) return false;
 
@@ -125,6 +181,14 @@ bool same(Parser *parser, TokenType type) {
 }
 
 // wanted token
+/**
+ * @brief Checks type and moves onto the next, if this fails handles error.
+ *
+ * @param parser
+ * @param type
+ * @param message
+ * @return true on success else false (+ error)
+ */
 bool want(Parser *parser, TokenType type, const char *message) {
     if(checkType(parser, type)){
         parseNext(parser);
@@ -148,6 +212,12 @@ char *copyStr(const char *str) {
 
 // MINI AST
 // PROLOG - je povinny takze staci bool neni treba pro nej vytvaret node
+/**
+ * @brief Checks the correctness of prolog.
+ *
+ * @param parser
+ * @return true on success else false
+ */
 bool parseProlog(Parser *parser) {
 
     if(!want(parser, TOKEN_KW_IMPORT, "Invalid prolog: Expected 'import'")){
@@ -204,6 +274,12 @@ bool parseFunction(Parser *parser){
 }
 
 // PROGRAM
+/**
+ * @brief Parses prolog, functions and checks EOF.
+ *
+ * @param parser
+ * @return node of program on success else NULL
+ */
 Node *parseProgram(Parser *parser) {
     if(!parseProlog(parser)) return NULL;
     if(!parseFunction(parser)) return NULL;
@@ -214,6 +290,12 @@ Node *parseProgram(Parser *parser) {
 }
 
 // LITERAL (INT, DOUBLE, STRING, UNIT?)
+/**
+ * @brief Parses literal tokens and creates AST node accordingly.
+ *
+ * @param parser
+ * @return node of literal on success else NULL
+ */
 Node *parseLiteral(Parser *parser) {
     Token *token = &parser->currentToken;
     NodeType type;
@@ -264,6 +346,13 @@ Node *parseLiteral(Parser *parser) {
     return literal;
 }
 
+// IDENTIFIER
+/**
+ * @brief Parses token identifier and creates node for AST.
+ *
+ * @param parser
+ * @return id node on success else NULL
+ */
 Node *parseId(Parser *parser) {
     if(!checkType(parser, TOKEN_ID)) {
         handleError(&parser->error, SYN_ERROR, "Expected identifier", parser->currentToken.lineNumber);
@@ -277,7 +366,7 @@ Node *parseId(Parser *parser) {
         return NULL;
     }
 
-    id->data.identifier.id= copyStr(parser->currentToken.stringValue);
+    id->data.identifier.id = copyStr(parser->currentToken.stringValue);
     if (!id->data.identifier.id) {
         handleError(&parser->error, INTERNAL_ERROR, "Failed to make a copy of identifier", parser->currentToken.lineNumber);
         destroyAST(id);
@@ -288,6 +377,14 @@ Node *parseId(Parser *parser) {
     return id;
 }
 
+// CALL
+/**
+ * @brief Parses function call and creates node for AST.
+ *
+ * @param parser
+ * @param id pointer to id node from parseId()
+ * @return call node on success else NULL
+ */
 Node *parseCall(Parser *parser, Node *id) {
 
     int line = id->line;
@@ -297,7 +394,7 @@ Node *parseCall(Parser *parser, Node *id) {
         handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'call' node", parser->currentToken.lineNumber);
         return NULL;
     }
-    // str ownership transfer
+    // str ownership transfer (id -> call)
     call->data.call.id = id->data.identifier.id;
     id->data.identifier.id = NULL;
     destroyAST(id);
@@ -349,6 +446,7 @@ Node *parseCall(Parser *parser, Node *id) {
     return call;
 }
 
+/* ======================== PRECEDENCE ============================== */
 static const char precedenceTable[6][6] = {
     // > ... reduce - neposouvej hranici redukuj vstup nespotrebuj token
     // < ... shift - vloz hranici a vstup
@@ -367,10 +465,23 @@ static const char precedenceTable[6][6] = {
     {'<', '<', '<', '<', '=', '!'},
     // rparen
     {'!', '>', '>', '!', '>', '>'},
-    // ex_end
+    // end
     {'<', '<', '<', '<', '!', 'E'},
 };
 
+/**
+ * @brief Pushes input onto precedence stack.
+ *
+ * For action <, inserts BORDER after the terminal closest to the top of the stack. Action = just pushes the element
+ * without BORDER. Creates AST node and consumes the current token.
+ *
+ * @param parser
+ * @param stack receives new element
+ * @param action '<' and '=' (from precedence table)
+ * @param symbol role in the expression
+ * @param termIdx index of closest terminal to the stack's top
+ * @return true on success, false when border insertion, operand parsing or pushing the element fails
+ */
 bool shiftStack(Parser *parser, Stack *stack, char action, OpSymbol symbol, size_t termIdx) {
     Token *token = &parser->currentToken;
 
@@ -401,6 +512,16 @@ bool shiftStack(Parser *parser, Stack *stack, char action, OpSymbol symbol, size
     return true;
 }
 
+/**
+ * @brief Reduces elements after BORDER to nonterminal.
+ *
+ * Finds the last BORDER based on the rule used creates node of AST for binary operation or reuses one for operands/expression.
+ * Replaces BORDER with elements with result expression.
+ *
+ * @param parser
+ * @param stack
+ * @return true on succes, false when border is missing, allocation of node fails or it is invalid reduce(no rule matches)
+ */
 bool reduceStack(Parser *parser, Stack *stack) {
     size_t borderIdx = stack->top;
 
@@ -463,11 +584,20 @@ bool reduceStack(Parser *parser, Stack *stack) {
         }
 
     }
-
     handleError(&parser->error, SYN_ERROR, "Invalid expression reduction", parser->currentToken.lineNumber);
     return false;
 }
 
+// EXPRESSION
+/**
+ * @brief Processes input token into an expression.
+ *
+ * Inserts expression end (END), based on token type determines the OpSymbol, then finds the adequate cell from precedence
+ * table and performs action accordingly.
+ *
+ * @param parser
+ * @return node of AST on success, else NULL
+ */
 Node *parseExpression(Parser *parser) {
     Token *token = &parser->currentToken;
     int line = token->lineNumber;
@@ -527,7 +657,6 @@ Node *parseExpression(Parser *parser) {
             if (maybe != EXPR && maybe != BORDER) break;
         }
 
-
         OpSymbol sym = stack.el[termIdx].symbol;
         char action = precedenceTable[sym][symbol];
 
@@ -573,14 +702,18 @@ Node *parseExpression(Parser *parser) {
                 free(stack.el);
                 return NULL;
         }
-        // tady byl stary blok
-
     }
-
     //Node *expression = createAST(AST_EXPRESSION, token->lineNumber);
-
 }
 
+// ASSIGNMENT
+/**
+ * @brief Parses assignment.
+ *
+ * @param parser
+ * @param id pointer to existing id node made by parseId()
+ * @return assign node on success else NULL
+ */
 Node *parseAssignment(Parser *parser,Node *id) {
     Token *token = &parser->currentToken;
     int line = token->lineNumber;
@@ -618,6 +751,14 @@ Node *parseAssignment(Parser *parser,Node *id) {
     return assign;
 }
 
+/**
+ * @brief Parses terminals.
+ *
+ * For TOKEN_ID can determine whether it is just id or function call.
+ *
+ * @param parser
+ * @return node on success else NULL
+ */
 Node *parseTerm(Parser *parser) {
     Token *token = &parser->currentToken;
     //TokenType type;

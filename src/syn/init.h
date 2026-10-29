@@ -3,7 +3,6 @@
  *
  * @brief Structure of parser
  *
- *
  * @authors
  * - Bára Wilhelmová(xwilheb00)
  *
@@ -21,6 +20,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* ======================== PARSER ========================== */
 typedef struct {
     Token currentToken;
     Token previousToken;
@@ -63,11 +63,12 @@ typedef enum {
     MUL_DIV,
     LPAREN,
     RPAREN,
-    END, // aka $ (end of expression)
-    EXPR, // aka E vyraz
+    END,    // aka $ (end of expression)
+    EXPR,   // aka E vyraz
     BORDER, // hranice
 } OpSymbol;
 
+// stack
 typedef struct {
     OpSymbol symbol;
     TokenType op;
@@ -77,7 +78,7 @@ typedef struct {
 
 typedef struct {
     StackEl *el;
-    int top; // pocet polozek, index vrcholu stacku el[top-1]
+    int top; // num of elements, top = el[top-1]
     size_t capacity;
     Error error;
 } Stack;
@@ -89,5 +90,7 @@ bool popStack(Stack *stack);
 StackEl *topStack(Stack *stack);
 
 bool shiftStack(Parser *parser, Stack *stack, char action, OpSymbol symbol, size_t termIdx);
+bool reduceStack(Parser *parser, Stack *stack);
+bool insertBorder(Stack *stack,  size_t termIdx, int line);
 
 #endif //SYN_INIT_H
