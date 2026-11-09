@@ -507,4 +507,3 @@ Token nextToken() {
                 break;
         }
     }
-}
