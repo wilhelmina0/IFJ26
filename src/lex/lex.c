@@ -1,3 +1,13 @@
+/**
+* @file lex.c
+* @brief Implementation of lexical analyzer for the language IFJ26
+*
+* This module reads input from stdin, manages indentation and generates a stream of tokens for the syntax analyzer.
+*
+* @author xvykopt00
+* @date 2026
+*/
+
 #define _POSIX_C_SOURCE 200809L //so the strdup works if we use C99
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +22,12 @@ static int stackTop = 0;
 static int owedDedents = 0;
 static int isStartOfLine = 1;
 
+/**
+* @brief Adds a char to the dynamic buffer and allocates more memory if it's needed.
+* 
+* @param buffer Pointer to the initialized struct StringBuffer
+* @param c The char to add (obtained using getchar())
+*/
 static void appendChar(StringBuffer *buffer, int c) {
     if (buffer->text == NULL) {
         buffer->capacity = 64;
@@ -26,7 +42,16 @@ static void appendChar(StringBuffer *buffer, int c) {
     buffer->text[buffer->length] = '\0';
 }
 
-static TokenType findKeyword(const char *text, const int len, const int lineNumber /*purely for error msgs*/) {
+/**
+* @brief Finds out if the loaded string is a keyword or an identifier.
+*
+* @param text Pointer to the loaded string
+* @param len Length of the string (to make it faster)
+* @param lineNumber The current line (purely for error msgs)
+* 
+* @return Token type
+*/
+static TokenType findKeyword(const char *text, const int len, const int lineNumber) {
     switch (len) {
         case 1:
             if (text[0] == '_') {
@@ -63,6 +88,9 @@ static TokenType findKeyword(const char *text, const int len, const int lineNumb
     return TOKEN_ID;
 }
 
+
+//Obtains the next token from stdin using a finite state machine
+//Uses a buffer to hold context and a stack for emiting dedent tokens.
 Token nextToken() {
     Token token;
     token.lineNumber = lineCounter;
@@ -233,20 +261,20 @@ Token nextToken() {
                 }
                 break;
             case LINE_START:
-                if (c == ' ') {
+                if (c == ' ') { //count empty spaces
                     spaceCounter++;
                     continue;
                 }
-                else if (c == '\t') {
+                else if (c == '\t') { //refuse tabs
                     fprintf(stderr, "Lexical error on line %d: Tabs are not allowed for indentation\n", token.lineNumber);
                     exit(1);
                 }
-                else if (c == '\n') {
+                else if (c == '\n') { //new line
                     lineCounter++;
                     spaceCounter = 0;
                     continue; 
                 }
-                else if (c == EOF) {
+                else if (c == EOF) { //dont forget to handle indentation on EOF
                     if (stackTop > 0) {
                         owedDedents = stackTop;
                         stackTop = 0;
@@ -258,28 +286,51 @@ Token nextToken() {
                     }
                     state = START;
                     continue;
-                } else {
-                    if (c == '/') {
+                }
+                else {
+                    if (c == '/') { //there might be a comment at the start of the line
                         int nextC = getchar();
-                        if (nextC == '/') {
-                            while ((c = getchar()) != '\n' && c != EOF);
-                            if (c == '\n') lineCounter++;
-                            spaceCounter = 0;
-                            if (c == EOF) ungetc(c, stdin);
+                        if (nextC == '/') { //it's a line comment!
+                            while ((c = getchar()) != '\n' && c != EOF); //just throw everything away until '\n' or EOF
+                            if (c == '\n') {
+                                lineCounter++;
+                            } else if (c == EOF) {
+                                ungetc(c, stdin);
+                            }
+                            spaceCounter = 0; //reset this before new line !!!
                             continue;
+                        } else if (nextC == '*') { //it's a block comment!
+                            int prev = 0;
+                            while ((c = getchar()) != EOF) {
+                                if (c == '\n') {
+                                    lineCounter++;
+                                    spaceCounter = 0; // Reset spaces if comment spans multiple lines
+                                }
+                                if (prev == '*' && c == '/') { //look back if we ended the comment or there just was a * in the comment
+                                    break;
+                                }
+                                prev = c;
+                            }
+                            if (c == EOF) {
+                                fprintf(stderr, "Lexical error: Unclosed block comment starting at line %d\n", token.lineNumber);
+                                exit(1);
+                            }
+                            continue;
+                        } else { // It's a division '/' at the start of the line!
+                            ungetc(nextC, stdin);
                         }
                     }
-                    
+
                     isStartOfLine = 0;
                     ungetc(c, stdin);
 
-                    if (spaceCounter > indentStack[stackTop]) {
+                    if (spaceCounter > indentStack[stackTop]) { //if there is more spaces than on the stack then we indent
                         stackTop++;
                         indentStack[stackTop] = spaceCounter;
                         token.type = TOKEN_INDENT;
                         return token;
                     }
-                    else if (spaceCounter < indentStack[stackTop]) {
+                    else if (spaceCounter < indentStack[stackTop]) { //if there is less spaces than on the stack we dedent
                         while (stackTop > 0 && spaceCounter < indentStack[stackTop]) {
                             stackTop--;
                             owedDedents++;
@@ -300,11 +351,11 @@ Token nextToken() {
                     }
                 }
                 break;
-            case IDENTIFIER:
+            case IDENTIFIER: //identifier or enum?
                 if (isalnum(c) || c == '_') {
                         appendChar(&buffer, c);
                         continue;
-                    } else {
+                } else {
                         ungetc(c, stdin);
                         
                         token.type = findKeyword(buffer.text, buffer.length, token.lineNumber);
@@ -315,8 +366,8 @@ Token nextToken() {
                         
                         free(buffer.text);
                         return token;
-                    }
-            case STRING:
+                }
+            case STRING: //just a string, sometimes there is something special in it
                 if (c == '"') {
                     token.type = TOKEN_STRING_LITERAL;
                     token.val.stringValue = buffer.text ? strdup(buffer.text) : strdup("");
@@ -336,7 +387,7 @@ Token nextToken() {
                     continue;
                 }
                 break;
-            case STRING_ESC:
+            case STRING_ESC: //something special in a string
                 if (c == 'n') {
                     appendChar(&buffer, '\n');
                 }
@@ -359,7 +410,7 @@ Token nextToken() {
 
                 state = STRING;
                 break;
-            case BLOCK_STRING:
+            case BLOCK_STRING: //stupid long string
                 if (c == EOF) {
                     fprintf(stderr, "Lexical error on line %d: unclosed block string\n", token.lineNumber);
                     exit(1);
@@ -369,7 +420,7 @@ Token nextToken() {
                     appendChar(&buffer, c);
                     continue;
                 }
-                else if (c == '"') {
+                else if (c == '"') { //always look a couple chars ahead until you find """
                     int nextC1 = getchar();
                     if (nextC1 == '"') {
                         int nextC2 = getchar();
@@ -394,8 +445,8 @@ Token nextToken() {
                     continue; 
                 }
                 break;
-            case INT:
-                if (isdigit(c)) {
+            case INT: 
+                if (isdigit(c)) { //add a digit
                     appendChar(&buffer, c);
                     continue;
                 }
@@ -403,26 +454,25 @@ Token nextToken() {
                     //do NOT append, just get rid of it
                     continue;
                 }
-                else if (c == '.') {
+                else if (c == '.') { //go to double
                     appendChar(&buffer, c);
                     state = DOUBLE;
                     continue;
                 }
-                else if (c == 'e' || c == 'E') {
+                else if (c == 'e' || c == 'E') { //go to the weird double
                     appendChar(&buffer, c);
                     state = DOUBLE_EXP;
                     continue;
                 }
-                else {
+                else { //the int ended, ungetc whatever ended it and return the token
                     ungetc(c, stdin);
                     token.type = TOKEN_INT_LITERAL;
                     token.val.intValue = (int)strtol(buffer.text, NULL, 10);
                     free(buffer.text);
                     return token;
                 }
-                break;
             case DOUBLE:
-                if (isdigit(c)) {
+                if (isdigit(c)) { //add a digit
                     appendChar(&buffer, c);
                     continue;
                 }
@@ -430,28 +480,27 @@ Token nextToken() {
                     //do NOT append, just get rid of it
                     continue;
                 }
-                else if (c == 'e' || c == 'E') {
+                else if (c == 'e' || c == 'E') { //go to the weird double
                     appendChar(&buffer, c);
                     state = DOUBLE_EXP;
                     continue;
                 }
                 else if (c == 'd' || c == 'D') {
-                    //do NOT append, just get rid of it, it's optional
+                    //do NOT append, just get rid of it, it's optional; also means the double ended, return the token (do not ungetc here, we dont care about the 'd' / 'D')
                     token.type = TOKEN_DOUBLE_LITERAL;
                     token.val.doubleValue = strtod(buffer.text, NULL);
                     free(buffer.text);
                     return token;
                 }
-                else {
+                else { //the double ended, ungetc whatever ended it and return the token
                     ungetc(c, stdin);
                     token.type = TOKEN_DOUBLE_LITERAL;
                     token.val.doubleValue = strtod(buffer.text, NULL);
                     free(buffer.text);
                     return token;
                 }
-                break;
-            case DOUBLE_EXP:
-                if (isdigit(c)) {
+            case DOUBLE_EXP: //(this is the weird double)
+                if (isdigit(c)) { //add a digit
                     appendChar(&buffer, c);
                     continue;
                 }
@@ -460,21 +509,20 @@ Token nextToken() {
                     continue;
                 }
                 else if (c == 'd' || c == 'D') {
-                    //do NOT append, just get rid of it, it's optional
+                    //do NOT append, just get rid of it, it's optional; also means the double ended, return the token (do not ungetc here, we dont care about the 'd' / 'D')
                     token.type = TOKEN_DOUBLE_LITERAL;
                     token.val.doubleValue = strtod(buffer.text, NULL);
                     free(buffer.text);
                     return token;
                 }
-                else {
+                else { //the weird double ended, ungetc whatever ended it and return the token
                     ungetc(c, stdin);
                     token.type = TOKEN_DOUBLE_LITERAL;
                     token.val.doubleValue = strtod(buffer.text, NULL);
                     free(buffer.text);
                     return token;
                 }
-                break;
-            case LINE_COMMENT:
+            case LINE_COMMENT: //just look for '\n' or EOF
                 if (c == '\n') {
                     ungetc(c, stdin);
                     state = START;
@@ -484,7 +532,7 @@ Token nextToken() {
                     state = START;
                 }
                 break;
-            case BLOCK_COMMENT:
+            case BLOCK_COMMENT: //just look for '*/' or EOF
                 if (c == '*') {
                     int nextC = getchar();
                     if (nextC == '/') {
@@ -502,8 +550,6 @@ Token nextToken() {
                     exit(1); 
                 }
                 break;
-            default:
-                
-                break;
         }
     }
+} //the end - yaaaay :D
