@@ -246,23 +246,11 @@ Token nextToken() {
                     spaceCounter = 0;
                     continue; 
                 }
-                else if (c == '/') {
-                    int nextC = getchar();
-                    if (nextC == '/') {
-                        while ((c = getchar()) != '\n' && c != EOF);
-                        if (c == '\n') lineCounter++;
-                        spaceCounter = 0;
-                        if (c == EOF) ungetc(c, stdin);
-                        continue;
-                    } else {
-                        ungetc(nextC, stdin);
-                    }
-                }
                 else if (c == EOF) {
                     if (stackTop > 0) {
                         owedDedents = stackTop;
                         stackTop = 0;
-                        ungetc(c, stdin); 
+                        ungetc(c, stdin);
                         
                         owedDedents--;
                         token.type = TOKEN_DEDENT;
@@ -270,8 +258,18 @@ Token nextToken() {
                     }
                     state = START;
                     continue;
-                }
-                else {
+                } else {
+                    if (c == '/') {
+                        int nextC = getchar();
+                        if (nextC == '/') {
+                            while ((c = getchar()) != '\n' && c != EOF);
+                            if (c == '\n') lineCounter++;
+                            spaceCounter = 0;
+                            if (c == EOF) ungetc(c, stdin);
+                            continue;
+                        }
+                    }
+                    
                     isStartOfLine = 0;
                     ungetc(c, stdin);
 
@@ -318,7 +316,6 @@ Token nextToken() {
                         free(buffer.text);
                         return token;
                     }
-                break;
             case STRING:
                 if (c == '"') {
                     token.type = TOKEN_STRING_LITERAL;
