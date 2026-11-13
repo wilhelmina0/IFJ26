@@ -117,7 +117,6 @@ typedef struct TOKEN
     } val;
 
     int lineNumber;
-    //int col_number; //we could have prettier error msgs with this but it would slow us down, pointless...
 } Token;
 
 /**
@@ -126,7 +125,9 @@ typedef struct TOKEN
 * Uses a buffer to hold context and a line for emiting dedent tokens.
 *
 * @return The struct Token obtaining the token type and in some cases it's value in a union
+*
+* @warning The caller must check error code after every call!!! If there is an error the token can and will contain garbage values!
 */
-Token nextToken();
+Token nextToken(Error *err);
 
 #endif //INIT_H
