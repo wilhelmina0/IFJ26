@@ -4,7 +4,7 @@
 *
 * This module reads input from stdin, manages indentation and generates a stream of tokens for the syntax analyzer.
 *
-* @author xvykopt00
+* @author Tadeáš Vykopal (xvykopt00)
 * @date 2026
 */
 
@@ -45,8 +45,10 @@ static void appendChar(StringBuffer *buffer, int c) {
 /**
 * @brief Finds out if the loaded string is a keyword or an identifier.
 *
+* Utilizes string length to make the lookup faster
+*
 * @param text Pointer to the loaded string
-* @param len Length of the string (to make it faster)
+* @param len Length of the string
 * @param lineNumber The current line (purely for error msgs)
 * 
 * @return Token type
@@ -98,11 +100,13 @@ Token nextToken() {
     LexerState state;
     int c;
 
+    //buffer that holds the indentation values
     StringBuffer buffer;
     buffer.capacity = 0;
     buffer.length = 0;
     buffer.text = NULL;
 
+    //first we need to figure out how to handle indentation
     if (owedDedents > 0) {
         owedDedents--;
         token.type = TOKEN_DEDENT;
@@ -148,6 +152,7 @@ Token nextToken() {
                     }
 
                     //operators
+                    //single character operators can be found instantly; for the double character ones we can just look one char ahead 
                     case '+': token.type = TOKEN_PLUS; return token;
                     case '-': token.type = TOKEN_MINUS; return token;
                     case '*': token.type = TOKEN_MUL; return token;
@@ -159,7 +164,7 @@ Token nextToken() {
                         } else if (nextC == '*') {
                             state = BLOCK_COMMENT;
                             continue;
-                        } else {
+                        } else { //if it actually wasn't a comment we have to ungetc the one char we read ahead and say it was a division
                             ungetc(nextC, stdin);
                             token.type = TOKEN_DIV;
                             return token;
@@ -170,7 +175,7 @@ Token nextToken() {
                         if (nextC == '=') {
                             token.type = TOKEN_EQ;
                             return token;
-                        } else {
+                        } else { //if it actually wasn't an equal we have to ungetc the one char we read ahead and say it was an assign
                             ungetc(nextC, stdin);
                             token.type = TOKEN_ASSIGN;
                             return token;
@@ -181,7 +186,7 @@ Token nextToken() {
                         if (nextC == '=') {
                             token.type = TOKEN_NEQ;
                             return token;
-                        } else {
+                        } else { //there is only one way a '!' can be used and its "!="
                             fprintf(stderr, "Lexical error on line %d: Expected '!='\n", token.lineNumber);
                             exit(1);
                         }
@@ -191,7 +196,7 @@ Token nextToken() {
                         if (nextC == '=') {
                             token.type = TOKEN_LTE;
                             return token;
-                        } else {
+                        } else { //if it actually wasn't an LTE we have to ungetc the one char we read ahead and say it was a LT
                             ungetc(nextC, stdin);
                             token.type = TOKEN_LT;
                             return token;
@@ -202,7 +207,7 @@ Token nextToken() {
                         if (nextC == '=') {
                             token.type = TOKEN_GTE;
                             return token;
-                        } else {
+                        } else { //if it actually wasn't a GTE we have to ungetc the one char we read ahead and say it was a GT
                             ungetc(nextC, stdin);
                             token.type = TOKEN_GT;
                             return token;
@@ -210,6 +215,7 @@ Token nextToken() {
                     }
 
                     //separators
+                    //really simple, all of them are single char
                     case '(': token.type = TOKEN_LPAREN; return token;
                     case ')': token.type = TOKEN_RPAREN; return token;
                     case ':': token.type = TOKEN_COLON; return token;
@@ -218,6 +224,7 @@ Token nextToken() {
                     case ';': token.type = TOKEN_SEMICOLON; return token;
                     
                     //strings
+                    //we have to look 2 chars ahead in case it's a block comment, in case it wasn't we have to ungetc the 2 chars (watchout for the ungetc order)
                     case '"': {
                         int nextC1 = getchar();
                         if (nextC1 == '"') {
@@ -240,21 +247,20 @@ Token nextToken() {
                     
                     //keywords, identifiers, all that
                     default:
-                        if (isalpha(c) || c == '_') {
+                        if (isalpha(c) || c == '_') { //alpha chars go into the buffer
                             appendChar(&buffer, c);
                             state = IDENTIFIER;
                             continue;
                         } 
-                        else if (isdigit(c)) {
+                        else if (isdigit(c)) { //digits go into the buffer too
                             appendChar(&buffer, c);
                             state = INT;
                             continue;
                         }
-                        else if (isspace(c)) {
-                            //just throw this away
+                        else if (isspace(c)) { //this is absolutely useless
                             continue;
                         }
-                        else {
+                        else { //somebody is trying to be funny
                             fprintf(stderr, "Lexical error on line %d: Unknown character '%c'\n", token.lineNumber, c);
                             exit(1);
                         }
@@ -278,7 +284,7 @@ Token nextToken() {
                     if (stackTop > 0) {
                         owedDedents = stackTop;
                         stackTop = 0;
-                        ungetc(c, stdin);
+                        ungetc(c, stdin); //ungetc the EOF so it gets handled properly in START state
                         
                         owedDedents--;
                         token.type = TOKEN_DEDENT;
@@ -294,13 +300,13 @@ Token nextToken() {
                             while ((c = getchar()) != '\n' && c != EOF); //just throw everything away until '\n' or EOF
                             if (c == '\n') {
                                 lineCounter++;
-                            } else if (c == EOF) {
-                                ungetc(c, stdin);
+                            } else if (c == EOF) { 
+                                ungetc(c, stdin); //ungetc the EOF so it gets handled properly in START state
                             }
                             spaceCounter = 0; //reset this before new line !!!
                             continue;
                         } else if (nextC == '*') { //it's a block comment!
-                            int prev = 0;
+                            int prev = 0; //we have to look back at the previous char instead of the next one because comments are just weird...
                             while ((c = getchar()) != EOF) {
                                 if (c == '\n') {
                                     lineCounter++;
@@ -311,7 +317,7 @@ Token nextToken() {
                                 }
                                 prev = c;
                             }
-                            if (c == EOF) {
+                            if (c == EOF) { //we do NOT ungetc the EOF here because the block comments need to be closed before EOF
                                 fprintf(stderr, "Lexical error: Unclosed block comment starting at line %d\n", token.lineNumber);
                                 exit(1);
                             }
@@ -321,8 +327,8 @@ Token nextToken() {
                         }
                     }
 
-                    isStartOfLine = 0;
-                    ungetc(c, stdin);
+                    isStartOfLine = 0; //figured out it's no longer a start of line
+                    ungetc(c, stdin); //we know it's time to count indents now, ungetc the first now-whitespace char we found so it doesn't get lost
 
                     if (spaceCounter > indentStack[stackTop]) { //if there is more spaces than on the stack then we indent
                         stackTop++;
@@ -351,7 +357,7 @@ Token nextToken() {
                     }
                 }
                 break;
-            case IDENTIFIER: //identifier or enum?
+            case IDENTIFIER: //we need to find out if we are reading an identifier or a keyword
                 if (isalnum(c) || c == '_') {
                         appendChar(&buffer, c);
                         continue;
@@ -387,7 +393,7 @@ Token nextToken() {
                     continue;
                 }
                 break;
-            case STRING_ESC: //something special in a string
+            case STRING_ESC: //that "something special" in a string
                 if (c == 'n') {
                     appendChar(&buffer, '\n');
                 }
@@ -420,7 +426,7 @@ Token nextToken() {
                     appendChar(&buffer, c);
                     continue;
                 }
-                else if (c == '"') { //always look a couple chars ahead until you find """
+                else if (c == '"') { //always look 2 chars ahead until you find """; watchout to ungetc in correct order
                     int nextC1 = getchar();
                     if (nextC1 == '"') {
                         int nextC2 = getchar();
