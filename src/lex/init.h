@@ -12,8 +12,8 @@
 
 #ifndef LEX_INIT_H
 #define LEX_INIT_H
-#include "error.h"
-#include "token.h"
+#include "../core/error.h"
+#include "../core/token.h"
 
 /**
 * @brief Obtains the next token from stdin using a finite state machine

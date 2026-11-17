@@ -4,7 +4,9 @@
 *
 * This module reads input from stdin, manages indentation and generates a stream of tokens for the syntax analyzer.
 *
-* @author Tadeáš Vykopal (xvykopt00)
+* @authors
+* - Tadeáš Vykopal (xvykopt00)
+*
 * @date 2026
 */
 
@@ -82,11 +84,14 @@ static int appendChar(StringBuffer *buffer, int c, Error *err) {
         }
     } else if (buffer->length + 1 >= buffer->capacity) {
         buffer->capacity *= 2;
-        buffer->text = realloc(buffer->text, buffer->capacity);
-        if (buffer->text == NULL) {
+        char *newText = realloc(buffer->text, buffer->capacity);
+        if (newText == NULL) {
+            free(buffer->text);
+            buffer->text = NULL;
             handleError(err, INTERNAL_ERROR, "Memory reallocation failed", lineCounter);
             return 0;
         }
+        buffer->text = newText;
     }
     buffer->text[buffer->length++] = (char) c;
     buffer->text[buffer->length] = '\0';
@@ -109,7 +114,7 @@ static TokenType findKeyword(const char *text, const int len, Error *err) {
         case 1:
             if (text[0] == '_') {
                 handleError(err, LEX_ERROR, "'_' itself cannot be an identifier", lineCounter);
-                exit(1);
+                return TOKEN_EOF;
             }
             break;
         case 2:
@@ -198,7 +203,7 @@ Token nextToken(Error *err) {
                             return token;
                         } else {
                             handleError(err, LEX_ERROR, "Expected '@main'\n", token.lineNumber);
-                            exit(1);
+                            return token;
                         }
                     }
 
@@ -239,7 +244,7 @@ Token nextToken(Error *err) {
                             return token;
                         } else { //there is only one way a '!' can be used and its "!="
                             handleError(err, LEX_ERROR, "Expected '!='\n", token.lineNumber);
-                            exit(1);
+                            return token;
                         }
                     }
                     case '<': {
@@ -313,7 +318,7 @@ Token nextToken(Error *err) {
                         }
                         else { //somebody is trying to be funny
                             handleError(err, LEX_ERROR, "Unknown character", token.lineNumber);
-                            exit(1);
+                            return token;
                         }
                 }
                 break;
@@ -324,7 +329,7 @@ Token nextToken(Error *err) {
                 }
                 else if (c == '\t') { //refuse tabs
                     handleError(err, LEX_ERROR, "Tabs are not allowed for indentation", token.lineNumber);
-                    exit(1);
+                    return token;
                 }
                 else if (c == '\n') { //new line
                     lineCounter++;
@@ -370,7 +375,7 @@ Token nextToken(Error *err) {
                             }
                             if (c == EOF) { //we do NOT ungetc the EOF here because the block comments need to be closed before EOF
                                 handleError(err, LEX_ERROR, "Unclosed block comment", token.lineNumber);
-                                exit(1);
+                                return token;
                             }
                             continue;
                         } else { // It's a division '/' at the start of the line!
@@ -395,7 +400,7 @@ Token nextToken(Error *err) {
 
                         if (spaceCounter != indentStack[stackTop]) {
                             handleError(err, LEX_ERROR, "Invalid indentation level level", token.lineNumber);
-                            exit(1);
+                            return token;
                         }
 
                         owedDedents--;
@@ -407,7 +412,6 @@ Token nextToken(Error *err) {
                         continue;
                     }
                 }
-                break;
             case IDENTIFIER: //we need to find out if we are reading an identifier or a keyword
                 if (isalnum(c) || c == '_') {
                         if (!appendChar(&buffer, c, err)) return token;
@@ -415,8 +419,13 @@ Token nextToken(Error *err) {
                 } else {
                         ungetc(c, stdin);
                         
-                        token.type = findKeyword(buffer.text, buffer.length, token.lineNumber);
+                        token.type = findKeyword(buffer.text, buffer.length, err);
                         
+                        if (err->code != SUCCESS) { //check if we passed findKeyword
+                            free(buffer.text);
+                            return token;
+                        }
+
                         if(token.type == TOKEN_ID) {
                             token.val.stringValue = strdup(buffer.text);
                         }
@@ -436,8 +445,9 @@ Token nextToken(Error *err) {
                     continue;
                 }
                 else if (c == EOF || c == '\n') {
+                    free(buffer.text);
                     handleError(err, LEX_ERROR, "Unclosed string", token.lineNumber);
-                    exit(1);
+                    return token;
                 }
                 else {
                     if (!appendChar(&buffer, c, err)) return token;
@@ -462,16 +472,18 @@ Token nextToken(Error *err) {
                     if (!appendChar(&buffer, '\\', err)) return token;
                 }
                 else {
+                    free(buffer.text);
                     handleError(err, LEX_ERROR, "Invalid escape sequence", token.lineNumber);
-                    exit(1);
+                    return token;
                 }
 
                 state = STRING;
                 break;
             case BLOCK_STRING: //stupid long string
                 if (c == EOF) {
+                    free(buffer.text);
                     handleError(err, LEX_ERROR, "Unclosed block string", token.lineNumber);
-                    exit(1);
+                    return token;
                 }
                 else if(c == '\n') {
                     lineCounter++;
@@ -605,9 +617,11 @@ Token nextToken(Error *err) {
                 }
                 else if (c == EOF) {
                     handleError(err, LEX_ERROR, "Unclosed block comment", token.lineNumber);
-                    fprintf(stderr, "Lexical error: Unclosed block comment starting at line %d\n", token.lineNumber);
-                    exit(1); 
+                    return token;
                 }
+                break;
+            default: //keep this here so gcc -Wall -Wextra doesn't complain
+                //if we get here something is VERY WRONG
                 break;
         }
     }
