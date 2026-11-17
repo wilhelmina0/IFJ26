@@ -14,7 +14,6 @@
 #include <ctype.h>
 #include <string.h>
 #include "init.h"
-#include "error.h"
 
 static int lineCounter = 1;
 static int spaceCounter = 0;
@@ -22,6 +21,41 @@ static int indentStack[100] = {0};
 static int stackTop = 0;
 static int owedDedents = 0;
 static int isStartOfLine = 1;
+
+/**
+ * @brief Internal states of the lexer's finite state machine.
+ */
+typedef enum {
+    START,           /**< Initial state, expects the beginning of a new lexeme */
+    LINE_START,      /**< Evaluates leading whitespace for indentation logic */
+
+    IDENTIFIER,      /**< Reading an identifier or keyword */
+
+    INT,             /**< Reading an integer literal */
+    DOUBLE,          /**< Reading the fractional part of a double literal */
+    DOUBLE_EXP,      /**< Reading the exponent part of a double literal */
+    
+    STRING,          /**< Reading a standard string literal */
+    STRING_ESC,      /**< Reading an escape sequence inside a string */
+    BLOCK_STRING,    /**< Reading a multiline block string literal */
+
+    MORE,            /**< Lookahead state for '>' or '>=' */
+    LESS,            /**< Lookahead state for '<' or '<=' */
+    SLASH,           /**< Lookahead state for division or comments */
+
+    LINE_COMMENT,    /**< Ignoring characters until the end of the line */
+    BLOCK_COMMENT,   /**< Ignoring characters until the block comment is closed */
+
+} LexerState;
+
+/**
+* @brief Struct of the dynamically allocated text buffer for loading lexems
+*/
+typedef struct {
+    char *text;
+    int length;
+    int capacity;
+} StringBuffer;
 
 /**
 * @brief Adds a char to the dynamic buffer and allocates more memory if it's needed.
