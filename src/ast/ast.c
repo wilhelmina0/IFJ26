@@ -19,6 +19,18 @@
  *
  * @return created node
  */
+
+static void destroyASTElement(void *element)
+{
+    Node *node = *(Node **)element;
+    destroyAST(node);
+}
+
+static const DT astNodeType = {
+    .size = sizeof(Node *),
+    .destroy = destroyASTElement
+};
+
 Node *createAST(NodeType type, int line) {
     Node *node = malloc(sizeof(Node));
 
@@ -32,6 +44,22 @@ Node *createAST(NodeType type, int line) {
     node->childCapacity = 0;
 
     memset(&node->data, 0, sizeof(node->data));
+
+    switch (type) {
+        case AST_PROGRAM:
+            listInit(&node->data.program.declarations, astNodeType);
+            break;
+        case AST_FUNCTION:
+            listInit(&node->data.function.params, astNodeType);
+            node->data.function.body = NULL;
+            break;
+        case AST_BLOCK:
+            listInit(&node->data.block.statements, astNodeType);
+            break;
+        case AST_CALL:
+            listInit(&node->data.call.args, astNodeType);
+            break;
+    }
 
     return node;
 }
@@ -69,6 +97,10 @@ void destroyAST(Node *node) {
     if(!node) return;
 
     switch(node->type) {
+        case AST_PROGRAM:
+            listClean(&node->data.program.declarations);
+            break;
+
         case AST_IDENTIFIER:
             free(node->data.identifier.id);
             break;
@@ -79,15 +111,56 @@ void destroyAST(Node *node) {
 
         case AST_ASSIGN:
             free(node->data.assignment.name);
-            free(node->data.assignment.value);
+            destroyAST(node->data.assignment.value);
+            break;
+
+        case AST_VARDECL:
+            free(node->data.varDeclaration.id);
+            destroyAST(node->data.varDeclaration.initializer);
             break;
 
         case AST_FUNCTION:
             free(node->data.function.id);
+            listClean(&node->data.function.params);
+            destroyAST(node->data.function.body);
+            break;
+
+        case AST_PARAM:
+            free(node->data.parameter.id);
+            break;
+
+        case AST_BLOCK:
+            listClean(&node->data.block.statements);
             break;
 
         case AST_CALL:
             free(node->data.call.id);
+            listClean(&node->data.call.args);
+            break;
+
+        case AST_BINARY:
+            destroyAST(node->data.binary.left);
+            destroyAST(node->data.binary.right);
+            break;
+
+        case AST_INT:
+        case AST_DOUBLE:
+        case AST_UNIT:
+            break;
+
+        case AST_RETURN:
+            destroyAST(node->data.returnNode.value);
+            break;
+
+        case AST_IF:
+            destroyAST(node->data.ifNode.cond);
+            destroyAST(node->data.ifNode.branchThen);
+            destroyAST(node->data.ifNode.branchElse);
+            break;
+
+        case AST_WHILE:
+            destroyAST(node->data.whileNode.cond);
+            destroyAST(node->data.whileNode.body);
             break;
 
         default:
@@ -111,6 +184,7 @@ void destroyAST(Node *node) {
  */
 void printAST(Node *node, size_t depth) {
     if(!node) return;
+
     for (size_t i = 0; i < depth; i++) printf("  ");
 
     switch(node->type) {
@@ -120,11 +194,15 @@ void printAST(Node *node, size_t depth) {
         case AST_FUNCTION:
             printf("FUNCTION: %s", node->data.function.id);
             break;
+        case AST_PARAM:
+            printf("PARAMETER: %s", node->data.parameter.id);
+            break;
         case AST_CALL:
             printf("CALL: %s", node->data.call.id);
             break;
         case AST_IDENTIFIER:
             printf("IDENTIFIER: %s", node->data.identifier.id);
+            break;
         case AST_STRING:
             printf("STRING: \"%s\"", node->data.stringLiteral.string);
             break;
@@ -135,10 +213,28 @@ void printAST(Node *node, size_t depth) {
             printf("INT: %d", node->data.intLiteral.value);
             break;
         case AST_ASSIGN:
-            printf("ASSIGN");
+            printf("ASSIGN: %s ", node->data.assignment.name);
+            break;
+        case AST_BINARY:
+            printf("BINARY: %d", (int)node->data.binary.op);
             break;
         case AST_BLOCK:
             printf("BLOCK");
+            break;
+        case AST_VARDECL:
+            printf("VARDECL: %s", node->data.varDeclaration.id);
+            break;
+        case AST_UNIT:
+            printf("UNIT");
+            break;
+        case AST_IF:
+            printf("IF");
+            break;
+        case AST_WHILE:
+            printf("WHILE");
+            break;
+        case AST_RETURN:
+            printf("RETURN");
             break;
 
         default:

@@ -13,6 +13,7 @@
 #define AST_H
 
 #include "../lex/init.h"
+#include "../core/list.h"
 
 #include "stdbool.h"
 #include <stdio.h>
@@ -23,19 +24,36 @@
 typedef enum {
     AST_PROGRAM,
     AST_FUNCTION,
+    AST_PARAM,
     AST_CALL,
     AST_BLOCK,
 
     AST_ASSIGN,
+    AST_VARDECL,
 
     AST_IDENTIFIER,
 
     AST_INT,
     AST_DOUBLE,
     AST_STRING,
+    AST_UNIT,
 
-    AST_BINARY
+    AST_BINARY,
+
+    AST_IF,
+    AST_WHILE,
+    AST_RETURN
 } NodeType;
+
+typedef enum {
+    TYPE_UNSPECIFIED = 0,
+    TYPE_INT,
+    TYPE_DOUBLE,
+    TYPE_STRING,
+    TYPE_UNIT
+} DeclType;
+
+struct Symbol;
 
 // structure of AST node
 typedef struct Node Node;
@@ -49,7 +67,12 @@ struct Node{
      size_t childCapacity;
 
      union {
+         // PROGRAM
+         struct {
+            List declarations;
+         } program;
 
+         // LITERALS
          struct {
              char *id;
          } identifier;
@@ -66,24 +89,69 @@ struct Node{
              char *string;
          } stringLiteral;
 
+         // FUNCTION, PARAM, BLOCK, CALL
          struct {
              char *id;
              bool main;
+             List params;
+             Node *body;
+             DeclType returnType;
+             struct Symbol *symbol;
          } function;
 
          struct {
              char *id;
+             DeclType declType;
+             struct Symbol *symbol;
+         } parameter;
+
+         struct {
+             List statements;
+         } block;
+
+         struct {
+             char *id;
+             List args;
+             struct Symbol *symbol;
          } call;
 
+         // ASSIGNMENT
          struct {
              char *name;
              Node *value;
          } assignment;
 
+         // VARIABLE DECLARATION
+         struct {
+             char *id;
+             Node *initializer;
+             bool mutable;
+             DeclType declType;
+             struct Symbol *symbol;
+         } varDeclaration;
+
+         // EXPRESSION
          struct {
              TokenType op;
              Node *left, *right;
          } binary;
+
+         // RETURN
+         struct {
+             Node *value; // can be NULL
+         } returnNode;
+
+         // IF, WHILE
+         struct {
+             Node *cond;
+             Node *branchThen;
+             Node *branchElse;
+         } ifNode;
+
+         struct {
+             Node *cond;
+             Node *body;
+         } whileNode;
 
      } data;
 };
