@@ -2,12 +2,12 @@
  * @file error.h
  * @brief Shared error handling
  *
- * Defines input and internal compiler errors
- * used across compiler mudules.
+ * Defines input and internal compiler errors used across compiler modules.
  *
  * @authors
  * - Bára Wilhelmová(xwilheb00)
  *
+ * @date 2026
  */
 
 #ifndef ERROR_H
