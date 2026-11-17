@@ -1,0 +1,7 @@
+//tests the simplest possible @main
+
+//source equivalent:
+
+import ifj26.*
+@main def run(): Unit =
+    ()

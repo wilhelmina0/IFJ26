@@ -1,0 +1,7 @@
+//tests precedence parsing, math and variables
+
+//source equivalent:
+
+import ifj26.*
+@main def math(): Unit =
+    val a = 5 + 3 * 2
