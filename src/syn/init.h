@@ -51,6 +51,9 @@ Node *parseAssignment(Parser *parser, Node *id); // assign
 
 Node *parseStatement(Parser *parser);
 
+bool parseParams(Parser *parser, List *params);
+bool parseType(Parser *parser, DeclType *type);
+
 Node *parseLiteral(Parser *parser);
 Node *parseTerm(Parser *parser);
 Node *parseId(Parser *parser);
@@ -60,8 +63,6 @@ Node *parseId(Parser *parser);
 typedef enum {
     NEG,     // !
     OPERAND,
-    ADD_SUB,
-    MUL_DIV,
     ADD_SUB, // + -
     MUL_DIV, // * /
     LPAREN,

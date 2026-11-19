@@ -862,9 +862,94 @@ Node *parseTerm(Parser *parser) {
 
         default:
             handleError(&parser->error, SYN_ERROR, "Expected expression", parser->currentToken.lineNumber);
+            return NULL;
+    }
+
+}
+
+bool parseParams(Parser *parser, List *params) {
+    if (checkType(parser, TOKEN_RPAREN)) return true;
+
+    while (true) {
+        if (!checkType(parser, TOKEN_ID)) {
+            handleError(&parser->error, SYN_ERROR, "Expected param identifier", parser->currentToken.lineNumber);
+            return false;
+        }
+
+        Node *param = createAST(AST_PARAM, parser->currentToken.lineNumber);
+        if (!param) return false;
+
+        param->data.parameter.symbol = NULL;
+        param->data.parameter.id = copyStr(parser->currentToken.stringValue);
+
+        if (!param->data.parameter.id) {
+            destroyAST(param);
+            return false;
+        }
+        parseNext(parser);
+        if (parser->error.code != SUCCESS) {
+            destroyAST(param);
+            return false;
+        }
+
+        if (!want(parser, TOKEN_COLON, "Expected ':'") || !parseType(parser, &param->data.parameter.declType)) {
+            destroyAST(param);
+            return false;
+        }
+
+        // list z params
+        bool insertParam;
+
+        if (listIsEmpty(params)) {
+            insertParam = insertFirst(params, &param);
+        } else {
+            listLast(params);
+            insertParam = insertAfter(params, &param);
+        }
+
+        if (!insertParam) {
+            destroyAST(param);
+            return false;
+        }
+
+        if (checkType(parser, TOKEN_RPAREN)) return true;
+
+        if (!want(parser, TOKEN_COMMA, "Expected ',' or ')'")) {
+            return false;
+        }
+    }
+}
+
+// data type
+bool parseType(Parser *parser, DeclType *type) {
+    DeclType dtype = TYPE_UNSPECIFIED;
+
+    switch (parser->currentToken.type) {
+        case TOKEN_TYPE_INT:
+            dtype = TYPE_INT;
+            break;
+        case TOKEN_TYPE_DOUBLE:
+            dtype = TYPE_DOUBLE;
+            break;
+        case TOKEN_TYPE_STRING:
+            dtype = TYPE_STRING;
+            break;
+        case TOKEN_TYPE_UNIT:
+            dtype = TYPE_UNIT;
+            break;
+
+        default:
+            handleError(&parser->error, SYN_ERROR, "Expected decl data type", parser->currentToken.lineNumber);
+            return false;
             break;
     }
 
+    parseNext(parser);
+
+    if (parser->error.code != SUCCESS) return false;
+
+    *type = dtype;
+    return true;
 }
 
 // STATEMENT
