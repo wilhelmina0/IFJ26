@@ -1,121 +1,186 @@
+/**
+ * @file symtable.c
+ * @brief AVL symbol table
+ *
+ * Inserts and finds symbols in a height-balanced binary search tree.
+ * Updates heights and restores balance while returning from recursive insertion.
+ *
+ * @authors
+ * - Radim Winter (xwinter01)
+ *
+ */
+
 #include "symtable.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct {
-  char *name;
-  Symbol value;
-} Entry;
+typedef struct TreeNode {
+    char *name;
+    Symbol value;
+    struct TreeNode *left;
+    struct TreeNode *right;
+    int height;
+} TreeNode;
 
 struct SymTable {
-  Entry *entries;
-  size_t capacity;
-  size_t count;
+    TreeNode *root;
 };
 
-static size_t hash_name(const char *name) {
-  size_t hash = 5381;
-  while (*name) {
-    hash = hash * 33 + (unsigned char)*name;
-    ++name;
-  }
-  return hash;
+/** @brief Returns zero for an empty subtree, otherwise its stored height. */
+static int height(const TreeNode *node) { return node ? node->height : 0; }
+
+/** @brief Recomputes a node's height from the heights of its children. */
+static void updateHeight(TreeNode *node)
+{
+    int leftHeight = height(node->left);
+    int rightHeight = height(node->right);
+    node->height = 1 + (leftHeight > rightHeight ? leftHeight : rightHeight);
 }
 
-static size_t find_slot(const Entry *entries, size_t capacity,
-                        const char *name) {
-  size_t index = hash_name(name) % capacity;
-  for (size_t tried = 0; tried < capacity; ++tried) {
-    if (!entries[index].name || strcmp(entries[index].name, name) == 0)
-      return index;
-    ++index;
-    if (index == capacity)
-      index = 0;
-  }
-  return SIZE_MAX;
+/** @brief Returns right height minus left height, following the IAL slides. */
+static int balance(const TreeNode *node) { return height(node->right) - height(node->left); }
+
+/** @brief Rotates left and returns the new root of this subtree. */
+static TreeNode *rotateLeft(TreeNode *root)
+{
+    TreeNode *pivot = root->right;
+    root->right = pivot->left;
+    pivot->left = root;
+    // The lower node must be updated before the new root.
+    updateHeight(root);
+    updateHeight(pivot);
+    return pivot;
 }
 
-static bool grow(SymTable *table) {
-  if (table->capacity > SIZE_MAX / 2 / sizeof(Entry))
-    return false;
-  size_t capacity = table->capacity * 2;
-  Entry *entries = calloc(capacity, sizeof(*entries));
-  if (!entries)
-    return false;
-  for (size_t i = 0; i < table->capacity; ++i) {
-    if (table->entries[i].name) {
-      size_t index = find_slot(entries, capacity, table->entries[i].name);
-      entries[index] = table->entries[i];
+/** @brief Rotates right and returns the new root of this subtree. */
+static TreeNode *rotateRight(TreeNode *root)
+{
+    TreeNode *pivot = root->left;
+    root->left = pivot->right;
+    pivot->right = root;
+    updateHeight(root);
+    updateHeight(pivot);
+    return pivot;
+}
+
+/** @brief Restores AVL balance after insertion, using a single or double rotation. */
+static TreeNode *rebalance(TreeNode *root)
+{
+    updateHeight(root);
+    int difference = balance(root);
+
+    if (difference < -1) {
+        if (balance(root->left) > 0) {
+            root->left = rotateLeft(root->left); // LR: first turn it into LL.
+        }
+        return rotateRight(root);
     }
-  }
-  free(table->entries);
-  table->entries = entries;
-  table->capacity = capacity;
-  return true;
-}
-
-SymTable *symtable_create(void) {
-  SymTable *table = malloc(sizeof(*table));
-  if (!table)
-    return NULL;
-  table->capacity = 16;
-  table->count = 0;
-  table->entries = calloc(table->capacity, sizeof(*table->entries));
-  if (!table->entries) {
-    free(table);
-    return NULL;
-  }
-  return table;
-}
-
-void symtable_destroy(SymTable *table) {
-  if (!table)
-    return;
-  for (size_t i = 0; i < table->capacity; ++i)
-    free(table->entries[i].name);
-  free(table->entries);
-  free(table);
-}
-
-bool symtable_find(const SymTable *table, const char *name, Symbol *out) {
-  if (!table || !name || !out)
-    return false;
-  size_t index = find_slot(table->entries, table->capacity, name);
-  if (index == SIZE_MAX || !table->entries[index].name)
-    return false;
-  *out = table->entries[index].value;
-  return true;
-}
-
-ErrorCode symtable_insert(SymTable *table, const char *name, Symbol value) {
-  if (!table || !name)
-    return INTERNAL_ERROR;
-  size_t index = find_slot(table->entries, table->capacity, name);
-  if (index != SIZE_MAX && table->entries[index].name)
-    return SEM_ERROR_REDEFINED;
-
-  size_t length = strlen(name);
-  if (length == SIZE_MAX)
-    return INTERNAL_ERROR;
-  char *copy = malloc(length + 1);
-  if (!copy)
-    return INTERNAL_ERROR;
-  memcpy(copy, name, length + 1);
-
-  if (table->count >= table->capacity - table->capacity / 4) {
-    if (!grow(table)) {
-      free(copy);
-      return INTERNAL_ERROR;
+    if (difference > 1) {
+        if (balance(root->right) < 0) {
+            root->right = rotateRight(root->right); // RL: first turn it into RR.
+        }
+        return rotateLeft(root);
     }
-    index = find_slot(table->entries, table->capacity, name);
-  }
-  if (index == SIZE_MAX) {
-    free(copy);
-    return INTERNAL_ERROR;
-  }
-  table->entries[index].name = copy;
-  table->entries[index].value = value;
-  ++table->count;
-  return SUCCESS;
+    return root;
+}
+
+/** @brief Allocates a leaf with its own copy of the name. */
+static TreeNode *createNode(const char *name, Symbol value)
+{
+    size_t length = strlen(name);
+    if (length == SIZE_MAX) {
+        return NULL;
+    }
+    TreeNode *node = malloc(sizeof(*node));
+    if (!node) {
+        return NULL;
+    }
+    node->name = malloc(length + 1);
+    if (!node->name) {
+        free(node);
+        return NULL;
+    }
+    memcpy(node->name, name, length + 1);
+    node->value = value;
+    node->left = NULL;
+    node->right = NULL;
+    node->height = 1;
+    return node;
+}
+
+/** @brief Inserts recursively, then rebalances each ancestor on the way back. */
+static TreeNode *insertNode(TreeNode *root, const char *name, Symbol value, ErrorCode *code)
+{
+    if (!root) {
+        TreeNode *node = createNode(name, value);
+        *code = node ? SUCCESS : INTERNAL_ERROR;
+        return node;
+    }
+    int order = strcmp(name, root->name);
+    if (order < 0) {
+        root->left = insertNode(root->left, name, value, code);
+    } else if (order > 0) {
+        root->right = insertNode(root->right, name, value, code);
+    } else {
+        *code = SEM_ERROR_REDEFINED;
+    }
+    // Failed insertion has not changed the subtree, so its heights still hold.
+    return *code == SUCCESS ? rebalance(root) : root;
+}
+
+/** @brief Frees children before their parent, leaving borrowed AST nodes alive. */
+static void destroyNodes(TreeNode *root)
+{
+    if (!root) {
+        return;
+    }
+    destroyNodes(root->left);
+    destroyNodes(root->right);
+    free(root->name);
+    free(root);
+}
+
+SymTable *symtableCreate(void)
+{
+    SymTable *table = malloc(sizeof(*table));
+    if (table) {
+        table->root = NULL;
+    }
+    return table;
+}
+
+void symtableDestroy(SymTable *table)
+{
+    if (table) {
+        destroyNodes(table->root);
+        free(table);
+    }
+}
+
+ErrorCode symtableInsert(SymTable *table, const char *name, Symbol value)
+{
+    if (!table || !name) {
+        return INTERNAL_ERROR;
+    }
+    ErrorCode code = SUCCESS;
+    table->root = insertNode(table->root, name, value, &code);
+    return code;
+}
+
+bool symtableFind(const SymTable *table, const char *name, Symbol *out)
+{
+    if (!table || !name || !out) {
+        return false;
+    }
+    const TreeNode *node = table->root;
+    while (node) {
+        int order = strcmp(name, node->name);
+        if (order == 0) {
+            *out = node->value;
+            return true;
+        }
+        node = order < 0 ? node->left : node->right;
+    }
+    return false;
 }
