@@ -1,0 +1,18 @@
+import ifj26.*
+
+/* blokovy komentar
+   pres vice radku */
+@main def litTest(): Unit =
+    val i1 = 0
+    val i2 = 1_000_000
+    val d1 = 0.5
+    val d2 = 12.34d
+    val d3 = 56.78D
+    val d4 = 1e5
+    val d5 = 2.5E2
+    val empty = ""
+    val esc = "radky:\n\t\"uvozovky\" \\ konec\r"
+    val block = """prvni radek
+druhy s "jednou" a ""dvema"" uvozovkami
+treti radek"""
+    val x = 10 /* komentar uprostred */ + 5

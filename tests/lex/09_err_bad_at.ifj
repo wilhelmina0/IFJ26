@@ -1,0 +1,3 @@
+import ifj26.*
+@other def f(): Unit =
+    ()

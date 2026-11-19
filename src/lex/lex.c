@@ -608,7 +608,7 @@ Token nextToken(Error *err) {
                     if (nextC == '/') {
                         state = START;
                     }
-                    else { 
+                    else {
                         ungetc(nextC, stdin);
                     }
                 }
