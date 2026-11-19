@@ -39,6 +39,7 @@ typedef enum {
     AST_UNIT,
 
     AST_BINARY,
+    AST_UNARY,
 
     AST_IF,
     AST_WHILE,
@@ -135,6 +136,11 @@ struct Node{
              TokenType op;
              Node *left, *right;
          } binary;
+
+         struct {
+             TokenType op;
+             Node *operand;
+         } unary;
 
          // RETURN
          struct {
