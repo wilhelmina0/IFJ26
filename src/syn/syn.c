@@ -263,23 +263,34 @@ Node *parseProgram(Parser *parser) {
         handleError(&parser->error, INTERNAL_ERROR, "Allocation of program node failed", parser->currentToken.lineNumber);
         return NULL;
     }
+    do {
+        Node *fun = parseFunction(parser);
+        if (!fun) {
+            destroyAST(program);
+            return NULL;
+        }
 
-    Node *fun = parseFunction(parser);
-    if (!fun) {
-        destroyAST(program);
-        return NULL;
-    }
+        List *declarations = &program->data.program.declarations;
+        bool insertFun;
 
-    if (!insertFirst(&program->data.program.declarations, &fun)) {
-        destroyAST(fun);
-        destroyAST(program);
-        handleError(&parser->error, INTERNAL_ERROR, "Failed to add function declaration", parser->currentToken.lineNumber);
-        return NULL;
-    }
+        if (listIsEmpty(declarations)) {
+            insertFun = insertFirst(declarations, &fun);
+        } else {
+            listLast(declarations);
+            insertFun = insertAfter(declarations, &fun);
+        }
+
+        if (!insertFun) {
+            destroyAST(fun);
+            destroyAST(program);
+            handleError(&parser->error, INTERNAL_ERROR, "Failed to add function declaration", parser->currentToken.lineNumber);
+            return NULL;
+        }
+    } while (checkType(parser, TOKEN_KW_DEF) || checkType(parser, TOKEN_ANNOTATION_MAIN));
 
     if(!checkType(parser, TOKEN_EOF)) {
-        destroyAST(program);
         handleError(&parser->error, SYN_ERROR, "Expected end of file", parser->currentToken.lineNumber);
+        destroyAST(program);
         return NULL;
     }
 
@@ -352,7 +363,7 @@ Node *parseLiteral(Parser *parser) {
  */
 Node *parseId(Parser *parser) {
     if(!checkType(parser, TOKEN_ID)) {
-        handleError(&parser->error, SYN_ERROR, "Expected identifier", parser->currentToken.lineNumber);
+        handleError(&parser->error, SYN_ERROR, "Expected 'ifj26' after 'import'", parser->currentToken.lineNumber);
         return NULL;
     }
     int line = parser->currentToken.lineNumber;

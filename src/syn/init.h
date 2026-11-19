@@ -60,8 +60,6 @@ Node *parseAssignment(Parser *parser, Node *id); // assign
 Node *parseReturn(Parser *parser);
 Node *parseDecl(Parser *parser);
 
-Node *parseStatement(Parser *parser);
-
 bool parseParams(Parser *parser, List *params);
 bool parseType(Parser *parser, DeclType *type);
 
