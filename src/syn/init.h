@@ -44,7 +44,8 @@ char *copyStr(const char *str);
 bool parseProlog(Parser *parser);       // checks prolog
 Node *parseProgram(Parser *parser);     // checks prolog, functions and EOF
 
-bool parseFunction(Parser *parser);           //(temporary bool before ast ops are finished;D)
+Node *parseFunction(Parser *parser);
+Node *parseBlock(Parser *parser);
 Node *parseCall(Parser *parser, Node *id);    // for function calls (print, ...)
 Node *parseExpression(Parser *parser); // expr
 Node *parseAssignment(Parser *parser, Node *id); // assign

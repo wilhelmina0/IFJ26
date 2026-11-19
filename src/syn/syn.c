@@ -243,36 +243,6 @@ bool parseProlog(Parser *parser) {
     return true;
 }
 
-// FUNCTION
-bool parseFunction(Parser *parser){
-
-    bool main = false;
-    char *id = NULL;
-
-    if(same(parser, TOKEN_ANNOTATION_MAIN)){
-        main = true;
-        id = "main";
-    }
-
-    if(!want(parser, TOKEN_KW_DEF, "Expected 'def'")){
-        return false;
-    }
-
-    if(checkType(parser, TOKEN_ID)){
-        id = parser->currentToken.stringValue;
-        parseNext(parser);
-    } else {
-        // error
-        return false;
-    }
-
-    if(!want(parser, TOKEN_LPAREN, "Expected '('")) return false;
-    // sem prijdou params
-    if(!want(parser, TOKEN_RPAREN, "Expected ')'")) return false;
-
-    return true;
-}
-
 // PROGRAM
 /**
  * @brief Parses prolog, functions and checks EOF.
@@ -865,6 +835,115 @@ Node *parseTerm(Parser *parser) {
             return NULL;
     }
 
+}
+
+// BLOCK
+Node *parseBlock(Parser *parser) {
+    int line = parser->currentToken.lineNumber;
+
+    if (!want(parser, TOKEN_INDENT, "Expected indentation")) {
+        handleError(&parser->error, SYN_ERROR, "Expected indentation", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    Node *block = createAST(AST_BLOCK, line);
+    if (!block) return NULL;
+
+    while (!checkType(parser, TOKEN_DEDENT)) {
+        if (same(parser, TOKEN_EOF)) {
+            handleError(&parser->error, SYN_ERROR, "Expected eof", parser->currentToken.lineNumber);
+        }
+
+        Node *statement = parseStatement(parser);
+        if (!statement) {
+            destroyAST(block);
+            return NULL;
+        }
+        // todo: prevazat na list
+        List *statements = &block->data.block.statements;
+        bool insertStatement;
+
+        if (listIsEmpty(statements)) {
+            insertStatement = insertFirst(statements, &statement);
+        } else {
+            listLast(statements);
+            insertStatement = insertAfter(statements, &statement);
+        }
+
+        if (!insertStatement) {
+            destroyAST(statement);
+            return NULL;
+        }
+    }
+    parseNext(parser);
+    return block;
+}
+
+
+// FUNCTION
+Node *parseFunction(Parser *parser){
+
+    bool main = false;
+    char *id = NULL;
+
+    if (same(parser, TOKEN_ANNOTATION_MAIN)){
+        main = true;
+        // id = "main";
+    }
+
+    if (!want(parser, TOKEN_KW_DEF, "Expected 'def'")){
+        return NULL;
+    }
+
+    if (!checkType(parser, TOKEN_ID)){
+        handleError(&parser->error, SYN_ERROR, "Expected identifier", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    Node *fun = createAST(AST_FUNCTION, parser->currentToken.lineNumber);
+    if (!fun) {
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'fun'", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    fun->data.function.main = main;
+    fun->data.function.returnType = TYPE_UNSPECIFIED;
+    fun->data.function.id = copyStr(parser->currentToken.stringValue);
+
+    if (!fun->data.function.id) {
+        destroyAST(fun);
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to copy 'fun' id", parser->currentToken.lineNumber);
+        return NULL;
+    }
+    parseNext(parser);
+
+    if(!want(parser, TOKEN_LPAREN, "Expected '('") || !parseParams(parser, &fun->data.function.params) || !want(parser, TOKEN_RPAREN, "Expected ')'")){
+        destroyAST(fun);
+        return NULL;
+    }
+
+    if (same(parser, TOKEN_COLON) && !parseType(parser, &fun->data.function.returnType)) {
+        destroyAST(fun);
+        return NULL;
+    }
+
+    if (!want(parser, TOKEN_ASSIGN, "Expected '='")) {
+        destroyAST(fun);
+        return NULL;
+    }
+
+    if (same(parser, TOKEN_EOL)) {
+        fun->data.function.body = parseBlock(parser); // block function definition -> block
+    } else {
+        fun->data.function.body = parseExpression(parser); // inline definition -> expr nb call
+    }
+
+    if (!fun->data.function.body) {
+        destroyAST(fun);
+        return NULL;
+    }
+
+    return fun;
 }
 
 bool parseParams(Parser *parser, List *params) {
