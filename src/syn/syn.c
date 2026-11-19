@@ -853,8 +853,8 @@ Node *parseTerm(Parser *parser) {
         case TOKEN_INT_LITERAL:
         case TOKEN_DOUBLE_LITERAL:
         case TOKEN_STRING_LITERAL:
-            parseLiteral(parser);
-            break;
+            return parseLiteral(parser);
+
         case TOKEN_ID: {
             Node *id = parseId(parser);
             if (!id) {
@@ -865,8 +865,6 @@ Node *parseTerm(Parser *parser) {
             // if next one is ( -> function call
             if (checkType(parser, TOKEN_LPAREN)) {
                 return parseCall(parser, id);
-            } else if (checkType(parser, TOKEN_ASSIGN)) {
-                return parseAssignment(parser, id);
             }
 
             return id;
