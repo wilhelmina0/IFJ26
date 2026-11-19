@@ -25,6 +25,9 @@ typedef struct {
     Token currentToken;
     Token previousToken;
 
+    bool fortuneTell; // rika jestli je treba znat hodnotu dalsiho tokenu
+    Token fortune; // "predpovi" dalsi token bez toho aniz by ho snedl
+
     Error error;
 } Parser;
 
@@ -46,6 +49,9 @@ Node *parseProgram(Parser *parser);     // checks prolog, functions and EOF
 
 Node *parseFunction(Parser *parser);
 Node *parseBlock(Parser *parser);
+TokenType statementFortune(Parser *parser);
+Node *parseStatement(Parser *parser);
+
 Node *parseCall(Parser *parser, Node *id);    // for function calls (print, ...)
 Node *parseExpression(Parser *parser); // expr
 Node *parseAssignment(Parser *parser, Node *id); // assign

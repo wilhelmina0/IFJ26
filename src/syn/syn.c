@@ -130,6 +130,7 @@ void parserInit(Parser *parser) {
     parser->error.code =  SUCCESS;
     parser->error.message = "";
     parser->error.line = 0;
+    parser->fortuneTell = false;
 
     // compound literal that uses designated initializer -> creates temporary object Token whose value we assign to prev
     parser->previousToken = (Token){.type = TOKEN_EOF}; // we need to initialize it so we can safely call freeToken
@@ -147,11 +148,19 @@ void synClean(Parser *parser) {
  *
  * @param parser
  */
-void parseNext(Parser *parser){
+bool parseNext(Parser *parser){
     freeToken(&parser->previousToken);
 
     parser->previousToken = parser->currentToken;
-    parser->currentToken = nextToken();
+    if (parser->fortuneTell != true) {
+        parser->currentToken = nextToken(&parser->error);
+        return true;
+    }
+
+    parser->currentToken = parser->fortune;
+    parser->fortuneTell = false;
+
+    return false;
 }
 
 // parser utils
@@ -1241,12 +1250,74 @@ Node *parseIf(Parser *parser) {
 
     return node;
 }
+
+TokenType statementFortune(Parser *parser) {
+    if (!parser->fortuneTell) {
+        parser->fortune = nextToken(&parser->error);
+        parser->fortuneTell = true;
+    }
+    return parser->fortune.type; // vrati typ tokenu predpovedi:D
+}
+
 // STATEMENT
 Node *parseStatement(Parser *parser) {
-    if (checkType(parser, TOKEN_ID))
-        return parseCall(parser, parseId(parser));
+    TokenType type = parser->currentToken.type;
+    Node *statement;
 
-    handleError(&parser->error, SYN_ERROR, "Expected statement", parser->currentToken.lineNumber);
+    switch (type) {
+        case LPAREN:
+        case TOKEN_PLUS:
+        case TOKEN_MINUS:
+        case TOKEN_INT_LITERAL:
+        case TOKEN_DOUBLE_LITERAL:
+        case TOKEN_STRING_LITERAL:
+            statement = parseExpression(parser);
+            break;
 
-    return NULL;
+        case TOKEN_KW_VAL:
+        case TOKEN_KW_VAR:
+            statement = parseDecl(parser);
+            break;
+
+        case TOKEN_ID: {
+            if (statementFortune(parser) == TOKEN_ASSIGN) {
+                Node *id = parseId(parser);
+                if (!id) return NULL;
+
+                statement = parseAssignment(parser, id);
+            } else {
+                statement = parseExpression(parser);
+            }
+            break;
+        }
+
+        case TOKEN_KW_RETURN:
+            statement = parseReturn(parser);
+            break;
+
+        case TOKEN_KW_IF:
+            return parseIf(parser);
+            break;
+
+        case TOKEN_KW_WHILE:
+            return parseWhile(parser);
+            break;
+
+        case TOKEN_LPAREN:
+            statement = parseExpression(parser);
+            break;
+
+        default:
+            handleError(&parser->error, SYN_ERROR, "Expected statement", parser->currentToken.lineNumber);
+            break;
+    }
+
+    if (!statement) return NULL;
+
+    if (!want(parser, TOKEN_EOL, "Expected EOL after statement")) {
+        destroyAST(statement);
+        return NULL;
+    }
+
+    return statement;
 }
