@@ -17,12 +17,19 @@
 #include <string.h>
 #include "init.h"
 
+//counters
 static int lineCounter = 1;
 static int spaceCounter = 0;
+static int commentDepth = 0;
+static int parenDepth = 0;
+static int owedDedents = 0;
+
+//flags
+static int isStartOfLine = 1;
+
+//indentation stack
 static int indentStack[100] = {0};
 static int stackTop = 0;
-static int owedDedents = 0;
-static int isStartOfLine = 1;
 
 /**
  * @brief Internal states of the lexer's finite state machine.
@@ -153,6 +160,7 @@ Token nextToken(Error *err) {
     Token token;
     token.lineNumber = lineCounter;
     spaceCounter = 0;
+    int hadNewLine = 0;
     LexerState state;
     int c;
 
@@ -184,14 +192,29 @@ Token nextToken(Error *err) {
                 switch (c) {
                     // Structural
                     case EOF:
-                        token.type = TOKEN_EOF;
+                        if(stackTop > 0) {
+                            owedDedents = stackTop - 1;
+                            stackTop = 0;
+                            ungetc(c, stdin); //ungetc the EOF so it gets handled properly
+                            token.type = TOKEN_DEDENT;
+                            return token;
+                        } else {
+                            token.type = TOKEN_EOF;
+                        }
                         return token;
                     case '\n':
-                        token.type = TOKEN_EOL;
-                        token.lineNumber = lineCounter;
-                        lineCounter++;
-                        isStartOfLine = 1;
-                        return token;
+                        if (parenDepth > 0) { //new line inside parens should be treated as whitespace
+                            lineCounter++;
+                            token.lineNumber = lineCounter;
+                            continue;
+                        }
+                        else {
+                            token.type = TOKEN_EOL;
+                            token.lineNumber = lineCounter;
+                            lineCounter++;
+                            isStartOfLine = 1;
+                            return token;
+                        }
                     case '@':{  //'@' can only be used with "main"
                         int nextC1 = getchar();
                         int nextC2 = getchar();
@@ -202,7 +225,7 @@ Token nextToken(Error *err) {
                             token.type = TOKEN_ANNOTATION_MAIN;
                             return token;
                         } else {
-                            handleError(err, LEX_ERROR, "Expected '@main'\n", token.lineNumber);
+                            handleError(err, LEX_ERROR, "Expected '@main'", token.lineNumber);
                             return token;
                         }
                     }
@@ -218,6 +241,7 @@ Token nextToken(Error *err) {
                             state = LINE_COMMENT;
                             continue;
                         } else if (nextC == '*') {
+                            commentDepth++;
                             state = BLOCK_COMMENT;
                             continue;
                         } else { //if it actually wasn't a comment we have to ungetc the one char we read ahead and say it was a division
@@ -243,7 +267,7 @@ Token nextToken(Error *err) {
                             token.type = TOKEN_NEQ;
                             return token;
                         } else { //there is only one way a '!' can be used and its "!="
-                            handleError(err, LEX_ERROR, "Expected '!='\n", token.lineNumber);
+                            handleError(err, LEX_ERROR, "Expected '!='", token.lineNumber);
                             return token;
                         }
                     }
@@ -271,14 +295,36 @@ Token nextToken(Error *err) {
                     }
 
                     //separators
-                    //really simple, all of them are single char
-                    case '(': token.type = TOKEN_LPAREN; return token;
-                    case ')': token.type = TOKEN_RPAREN; return token;
                     case ':': token.type = TOKEN_COLON; return token;
                     case ',': token.type = TOKEN_COMMA; return token;
-                    case '.': token.type = TOKEN_DOT; return token;
                     case ';': token.type = TOKEN_SEMICOLON; return token;
-                    
+
+                    case '(': {
+                        parenDepth++;
+                        token.type = TOKEN_LPAREN; 
+                        return token;
+                    }
+                    case ')': {
+                        if (parenDepth > 0) {
+                            parenDepth--;
+                        }
+                        
+                        token.type = TOKEN_RPAREN; 
+                        return token;
+                    }
+                    case '.': {
+                        int nextC = getchar(); //check if nextC is a digit, if it is it's something called "Leading-dot double"
+                        if (isdigit(nextC)) {
+                            if (!appendChar(&buffer, c, err)) return token;
+                            if (!appendChar(&buffer, nextC, err)) return token;
+                            state = DOUBLE;
+                            continue;
+                        } else {
+                            ungetc(nextC, stdin);
+                            token.type = TOKEN_DOT;
+                            return token;
+                        }
+                    }
                     //strings
                     //we have to look 2 chars ahead in case it's a block comment, in case it wasn't we have to ungetc the 2 chars (watchout for the ungetc order)
                     case '"': {
@@ -321,7 +367,6 @@ Token nextToken(Error *err) {
                             return token;
                         }
                 }
-                break;
             case LINE_START:
                 if (c == ' ') { //count empty spaces
                     spaceCounter++;
@@ -333,6 +378,7 @@ Token nextToken(Error *err) {
                 }
                 else if (c == '\n') { //new line
                     lineCounter++;
+                    token.lineNumber = lineCounter;
                     spaceCounter = 0;
                     continue; 
                 }
@@ -346,6 +392,7 @@ Token nextToken(Error *err) {
                         token.type = TOKEN_DEDENT;
                         return token;
                     }
+                    token.lineNumber = lineCounter; //freshen up in case we skipped lines
                     state = START;
                     continue;
                 }
@@ -356,20 +403,33 @@ Token nextToken(Error *err) {
                             while ((c = getchar()) != '\n' && c != EOF); //just throw everything away until '\n' or EOF
                             if (c == '\n') {
                                 lineCounter++;
+                                token.lineNumber = lineCounter; //so potential errors show on correct lines
                             } else if (c == EOF) { 
                                 ungetc(c, stdin); //ungetc the EOF so it gets handled properly in START state
                             }
                             spaceCounter = 0; //reset this before new line !!!
                             continue;
                         } else if (nextC == '*') { //it's a block comment!
+                            commentDepth++;
                             int prev = 0; //we have to look back at the previous char instead of the next one because comments are just weird...
                             while ((c = getchar()) != EOF) {
                                 if (c == '\n') {
                                     lineCounter++;
+                                    token.lineNumber = lineCounter; //so potential errors show on correct lines
                                     spaceCounter = 0; // Reset spaces if comment spans multiple lines
                                 }
+                                if (prev == '/' && c == '*') {
+                                    commentDepth++;
+                                    prev = 0;
+                                    continue;
+                                }
                                 if (prev == '*' && c == '/') { //look back if we ended the comment or there just was a * in the comment
-                                    break;
+                                    commentDepth--;
+                                    prev = 0;
+                                    if (commentDepth == 0) {
+                                        break;
+                                    }
+                                    continue;
                                 }
                                 prev = c;
                             }
@@ -385,6 +445,7 @@ Token nextToken(Error *err) {
 
                     isStartOfLine = 0; //figured out it's no longer a start of line
                     ungetc(c, stdin); //we know it's time to count indents now, ungetc the first now-whitespace char we found so it doesn't get lost
+                    token.lineNumber = lineCounter; //
 
                     if (spaceCounter > indentStack[stackTop]) { //if there is more spaces than on the stack then we indent
                         stackTop++;
@@ -399,7 +460,7 @@ Token nextToken(Error *err) {
                         }
 
                         if (spaceCounter != indentStack[stackTop]) {
-                            handleError(err, LEX_ERROR, "Invalid indentation level level", token.lineNumber);
+                            handleError(err, LEX_ERROR, "Invalid indentation level", token.lineNumber);
                             return token;
                         }
 
@@ -408,6 +469,7 @@ Token nextToken(Error *err) {
                         return token;
                     }
                     else {
+                        token.lineNumber = lineCounter; //freshen up in case we skipped lines
                         state = START;
                         continue;
                     }
@@ -453,7 +515,6 @@ Token nextToken(Error *err) {
                     if (!appendChar(&buffer, c, err)) return token;
                     continue;
                 }
-                break;
             case STRING_ESC: //that "something special" in a string
                 if (c == 'n') {
                     if (!appendChar(&buffer, '\n', err)) return token;
@@ -514,23 +575,50 @@ Token nextToken(Error *err) {
                     if (!appendChar(&buffer, c, err)) return token;
                     continue; 
                 }
-                break;
             case INT: 
-                if (isdigit(c)) { //add a digit
+                if (isdigit(c)) { //check if we are not reading a "Leading-0 INT"; if not then add the digit
+                    if (buffer.length == 1 && buffer.text[0] == '0') {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Leading zeros are not allowed in integer literals", token.lineNumber);
+                        return token;
+                    }
                     if (!appendChar(&buffer, c, err)) return token;
                     continue;
                 }
-                else if (c == '_') {
+                else if (c == '_') { //check if we are not reading a "Leading-0 INT"; if not then just skip the '_' and continue
+                    if (buffer.length == 1 && buffer.text[0] == '0') {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Leading zeros are not allowed in integer literals", token.lineNumber);
+                        return token;
+                    }
                     //do NOT append, just get rid of it
                     continue;
                 }
-                else if (c == '.') { //go to double
+                else if (c == '.') { //check if the number continues after the dot, then go to double
+                    int nextC = getchar();
+                    if (!isdigit(nextC)) {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Digit missing after '.'", token.lineNumber);
+                        return token;
+                    }
                     if (!appendChar(&buffer, c, err)) return token;
+                    if (!appendChar(&buffer, nextC, err)) return token;
                     state = DOUBLE;
                     continue;
                 }
-                else if (c == 'e' || c == 'E') { //go to the weird double
+                else if (c == 'e' || c == 'E') { //watchout for the optional '+' or '-'; if there is no digit after then throw error, otherwise go to the weird double
                     if (!appendChar(&buffer, c, err)) return token;
+                    int nextC = getchar();
+                    if (nextC == '+' || nextC == '-') {
+                        if (!appendChar(&buffer, nextC, err)) return token;
+                        nextC = getchar();
+                    }
+                    if (!isdigit(nextC)) {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Invalid exponent in double literal", token.lineNumber);
+                        return token;
+                    }
+                    if (!appendChar(&buffer, nextC, err)) return token;
                     state = DOUBLE_EXP;
                     continue;
                 }
@@ -550,8 +638,19 @@ Token nextToken(Error *err) {
                     //do NOT append, just get rid of it
                     continue;
                 }
-                else if (c == 'e' || c == 'E') { //go to the weird double
+                else if (c == 'e' || c == 'E') { //watchout for the optional '+' or '-'; if there is no digit after then throw error, otherwise go to the weird double
                     if (!appendChar(&buffer, c, err)) return token;
+                    int nextC = getchar();
+                    if (nextC == '+' || nextC == '-') {
+                        if (!appendChar(&buffer, nextC, err)) return token;
+                        nextC = getchar();
+                    }
+                    if (!isdigit(nextC)) {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Invalid exponent in double literal", token.lineNumber);
+                        return token;
+                    }
+                    if (!appendChar(&buffer, nextC, err)) return token;
                     state = DOUBLE_EXP;
                     continue;
                 }
@@ -602,20 +701,34 @@ Token nextToken(Error *err) {
                     state = START;
                 }
                 break;
-            case BLOCK_COMMENT: //just look for '*/' or EOF
-                if (c == '*') {
+            case BLOCK_COMMENT: //count nested comments and exit if commentDepth == 0; + look for EOF
+                if (c == '/') {
                     int nextC = getchar();
-                    if (nextC == '/') {
-                        state = START;
-                    }
-                    else {
+                    if (nextC == '*') {
+                        commentDepth++;
+                    } else {
                         ungetc(nextC, stdin);
                     }
-                }
-                else if (c == '\n') {
+                } else if (c == '*') {
+                    int nextC = getchar();
+                    if (nextC == '/') {
+                        commentDepth--;
+                        if (commentDepth == 0) {
+                            if (hadNewLine && parenDepth == 0) {
+                                isStartOfLine = 1;
+                                token.lineNumber = lineCounter;
+                                token.type = TOKEN_EOL;
+                                return token;
+                            }
+                            state = START;
+                        }
+                    } else {
+                        ungetc(nextC, stdin);
+                    }
+                } else if (c == '\n') {
                     lineCounter++;
-                }
-                else if (c == EOF) {
+                    hadNewLine = 1;
+                } else if (c == EOF) {
                     handleError(err, LEX_ERROR, "Unclosed block comment", token.lineNumber);
                     return token;
                 }
