@@ -4,7 +4,7 @@
  * @brief Structure of parser
  *
  * @authors
- * - Bára Wilhelmová(xwilheb00)
+ * - Bára Wilhelmová (xwilheb00)
  *
  */
 
@@ -44,12 +44,16 @@ char *copyStr(const char *str);
 bool parseProlog(Parser *parser);       // checks prolog
 Node *parseProgram(Parser *parser);     // checks prolog, functions and EOF
 
-bool parseFunction(Parser *parser);           //(temporary bool before ast ops are finished;D)
+Node *parseFunction(Parser *parser);
+Node *parseBlock(Parser *parser);
 Node *parseCall(Parser *parser, Node *id);    // for function calls (print, ...)
-Node *parseExpression(Parser *parser); // výrazy
-Node *parseAssignment(Parser *parser, Node *id); // přiřazení
+Node *parseExpression(Parser *parser); // expr
+Node *parseAssignment(Parser *parser, Node *id); // assign
 
 Node *parseStatement(Parser *parser);
+
+bool parseParams(Parser *parser, List *params);
+bool parseType(Parser *parser, DeclType *type);
 
 Node *parseLiteral(Parser *parser);
 Node *parseTerm(Parser *parser);
@@ -58,14 +62,18 @@ Node *parseId(Parser *parser);
 /* ======================== PRECEDENCE ========================== */
 // for expressions
 typedef enum {
+    NEG,     // !
     OPERAND,
-    ADD_SUB,
-    MUL_DIV,
+    ADD_SUB, // + -
+    MUL_DIV, // * /
     LPAREN,
     RPAREN,
+    COMP,   // < <= > >=
+    // && a ||
+    EQUAL,  // == !=
     END,    // aka $ (end of expression)
-    EXPR,   // aka E vyraz
-    BORDER, // hranice
+    EXPR,   // expr
+    BORDER, // border
 } OpSymbol;
 
 // stack

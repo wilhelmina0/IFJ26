@@ -143,6 +143,10 @@ void destroyAST(Node *node) {
             destroyAST(node->data.binary.right);
             break;
 
+        case AST_UNARY:
+            destroyAST(node->data.unary.operand);
+            break;
+
         case AST_INT:
         case AST_DOUBLE:
         case AST_UNIT:

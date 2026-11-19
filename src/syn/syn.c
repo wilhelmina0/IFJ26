@@ -6,7 +6,7 @@
  * and then creates AST nodes.
  *
  * @authors
- * - Bára Wilhelmová(xwilheb00)
+ * - Bára Wilhelmová (xwilheb00)
  *
  */
 
@@ -243,36 +243,6 @@ bool parseProlog(Parser *parser) {
     return true;
 }
 
-// FUNCTION
-bool parseFunction(Parser *parser){
-
-    bool main = false;
-    char *id = NULL;
-
-    if(same(parser, TOKEN_ANNOTATION_MAIN)){
-        main = true;
-        id = "main";
-    }
-
-    if(!want(parser, TOKEN_KW_DEF, "Expected 'def'")){
-        return false;
-    }
-
-    if(checkType(parser, TOKEN_ID)){
-        id = parser->currentToken.stringValue;
-        parseNext(parser);
-    } else {
-        // error
-        return false;
-    }
-
-    if(!want(parser, TOKEN_LPAREN, "Expected '('")) return false;
-    // sem prijdou params
-    if(!want(parser, TOKEN_RPAREN, "Expected ')'")) return false;
-
-    return true;
-}
-
 // PROGRAM
 /**
  * @brief Parses prolog, functions and checks EOF.
@@ -281,11 +251,34 @@ bool parseFunction(Parser *parser){
  * @return node of program on success else NULL
  */
 Node *parseProgram(Parser *parser) {
+    int line = parser->currentToken.lineNumber;
     if(!parseProlog(parser)) return NULL;
-    if(!parseFunction(parser)) return NULL;
-    if(!checkType(parser, TOKEN_EOF)) return NULL;
 
-    Node *program = createAST(AST_PROGRAM, parser->currentToken.lineNumber);
+    Node *program = createAST(AST_PROGRAM, line);
+    if (!program) {
+        handleError(&parser->error, INTERNAL_ERROR, "Allocation of program node failed", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    Node *fun = parseFunction(parser);
+    if (!fun) {
+        destroyAST(program);
+        return NULL;
+    }
+
+    if (!insertFirst(&program->data.program.declarations, &fun)) {
+        destroyAST(fun);
+        destroyAST(program);
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to add function declaration", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    if(!checkType(parser, TOKEN_EOF)) {
+        destroyAST(program);
+        handleError(&parser->error, SYN_ERROR, "Expected end of file", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
     return program; // vraci root node ast
 }
 
@@ -427,13 +420,32 @@ Node *parseCall(Parser *parser, Node *id) {
                 handleError(&parser->error, SYN_ERROR, "Expected argument", line);
                 return NULL;
             }
+            // args as list
+            List *args = &call->data.call.args;
+            bool insertArg;
 
+            if (listIsEmpty(args)) {
+                insertArg = insertFirst(args, &arg);
+            } else {
+                listLast(args);
+                insertArg = insertAfter(args, &arg);
+            }
+
+            if (!insertArg) {
+                destroyAST(arg);
+                destroyAST(call);
+                handleError(&parser->error, INTERNAL_ERROR, "Failed to add argument", line);
+                return false;
+            }
+
+            /* old varianta pres children
             if (!addChild(call, arg)) {
                 handleError(&parser->error, INTERNAL_ERROR, "Failed to add child node", line);
                 destroyAST(arg);
                 destroyAST(call);
                 return NULL;
             }
+            */
         } while (same(parser, TOKEN_COMMA));
 
     }
@@ -447,26 +459,33 @@ Node *parseCall(Parser *parser, Node *id) {
 }
 
 /* ======================== PRECEDENCE ============================== */
-static const char precedenceTable[6][6] = {
+static const char precedenceTable[9][9] = {
     // > ... reduce - neposouvej hranici redukuj vstup nespotrebuj token
     // < ... shift - vloz hranici a vstup
     // ! ... invalid operation combination
     // = ... insert input and shift
     // E ... end state
 
-    // operand add_sub mul_div lparen rparen end
+    // INPUT: neg operand add_sub mul_div lparen rparen comp equal end
+    // ON STACK:
+    // neg
+    {'<', '<', '>', '>', '<', '>', '>', '>', '>'},
     // operand
-    {'!', '>', '>', '!', '>', '>'},
+    {'!', '!', '>', '>', '!', '>', '>', '>', '>'},
     // add_sub
-    {'<', '>', '<', '<', '>', '>'},
+    {'<', '<', '>', '<', '<', '>', '>', '>', '>'},
     // mul_div
-    {'<', '>', '>', '<', '>', '>'},
+    {'<','<', '>', '>', '<', '>', '>', '>', '>'},
     // lparen
-    {'<', '<', '<', '<', '=', '!'},
+    {'<', '<', '<', '<', '<', '=', '<', '<','!'},
     // rparen
-    {'!', '>', '>', '!', '>', '>'},
+    {'!','!', '>', '>', '!', '>', '>', '>', '>'},
+    // comp
+    {'<', '<', '<', '<', '<', '>', '!', '>', '>'},
+    // equal
+    {'<', '<', '<', '<', '<', '>', '<', '!', '>'},
     // end
-    {'<', '<', '<', '<', '!', 'E'},
+    {'<', '<', '<', '<', '<', '!', '<', '<', 'E'},
 };
 
 /**
@@ -493,7 +512,7 @@ bool shiftStack(Parser *parser, Stack *stack, char action, OpSymbol symbol, size
     }
     StackEl item = {.symbol = symbol,.op = token->type, .node = NULL, .line = token->lineNumber}; // input el
     if (item.symbol == OPERAND) {
-        item.node = parseLiteral(parser);
+        item.node = parseTerm(parser); // parseLiteral()
         if (!item.node) {
             return false;
         }
@@ -548,13 +567,51 @@ bool reduceStack(Parser *parser, Stack *stack) {
         return true;
     }
 
+    // () -> unit
+    if (count == 2 && stack->el[borderIdx + 1].symbol == LPAREN && stack->el[borderIdx + 2].symbol == RPAREN) {
+        Node *unit = createAST(AST_UNIT, stack->el[borderIdx + 1].line); // UNIT basically an empty expr
+        if (!unit) {
+            handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'unit' node", stack->el[borderIdx + 1].line);
+            return false;
+        }
+
+        stack->el[borderIdx].node = unit;
+        stack->el[borderIdx].symbol = EXPR;
+        stack->el[borderIdx].line = stack->el[borderIdx + 1].line;
+
+        stack->top = borderIdx + 1;
+        return true;
+    }
+
+    if (count == 2 && stack->el[borderIdx + 1].symbol == NEG && stack->el[borderIdx + 2].symbol == EXPR) {
+        StackEl *sign = &stack->el[borderIdx + 1];
+        StackEl *num = &stack->el[borderIdx + 2];
+
+        Node *unary = createAST(AST_UNARY, sign->line);
+        if (!unary) {
+            handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'unary' node", sign->line);
+            return false;
+        }
+
+        unary->data.unary.op = sign->op;
+        unary->data.unary.operand = num->node;
+
+        stack->el[borderIdx].node = unary;
+        stack->el[borderIdx].line = sign->line;
+        stack->el[borderIdx].symbol = EXPR;
+
+        stack->top = borderIdx + 1;
+        return true;
+    }
+
     // expr operator expr
     if (count == 3) {
         StackEl *left = &stack->el[borderIdx + 1];
         StackEl *mid = &stack->el[borderIdx + 2];
         StackEl *right = &stack->el[borderIdx + 3];
 
-        if (left->symbol == EXPR && right->symbol == EXPR && (mid->symbol == ADD_SUB || mid->symbol == MUL_DIV)) {
+        if (left->symbol == EXPR && right->symbol == EXPR &&
+            (mid->symbol == ADD_SUB || mid->symbol == MUL_DIV || mid->symbol == COMP || mid->symbol == EQUAL)) {
             // ast here
             Node *bin = createAST(AST_BINARY, mid->line);
             if (!bin) {
@@ -575,7 +632,7 @@ bool reduceStack(Parser *parser, Stack *stack) {
         }
 
         // (expr) -> expr
-        if (left->symbol == LPAREN && right->symbol == RPAREN && mid->symbol ==  EXPR) {
+        if (left->symbol == LPAREN && mid->symbol ==  EXPR && right->symbol == RPAREN ) {
             StackEl result = *mid;
 
             stack->el[borderIdx] = result;
@@ -604,7 +661,8 @@ Node *parseExpression(Parser *parser) {
     Stack stack;
     OpSymbol symbol;
     StackEl bottom = {.symbol = END, .line = 0};
-
+    int depth = 0;
+    bool oprWanted = true; // expecting an operand
 
     initStack(&stack);
     if (!pushStack(&stack, bottom)) {
@@ -616,12 +674,29 @@ Node *parseExpression(Parser *parser) {
         switch (token->type) {
             case TOKEN_PLUS:
             case TOKEN_MINUS:
-                symbol = ADD_SUB;
+                symbol = oprWanted ? NEG : ADD_SUB; // neg ma stejnou precedenci jako unarni + a -
                 break;
+            // todo: lex chybi ! token
+            /*
+                case TOKEN_NOT:
+                symbol = NEG;
+                break;
+            */
             case TOKEN_MUL:
             case TOKEN_DIV:
                 symbol = MUL_DIV;
                 break;
+            case TOKEN_LT:
+            case TOKEN_LTE:
+            case TOKEN_GT:
+            case TOKEN_GTE:
+                symbol = COMP;
+                break;
+            case TOKEN_EQ:
+            case TOKEN_NEQ:
+                symbol = EQUAL;
+                break;
+            case TOKEN_ID:
             case TOKEN_INT_LITERAL:
             case TOKEN_DOUBLE_LITERAL:
             case TOKEN_STRING_LITERAL:
@@ -631,8 +706,11 @@ Node *parseExpression(Parser *parser) {
                 symbol = LPAREN;
                 break;
             case TOKEN_RPAREN:
-                symbol = RPAREN;
+                symbol = depth == 0 ? END : RPAREN;
                 break;
+            case TOKEN_DEDENT:
+            case TOKEN_COMMA:
+            case TOKEN_EOL:
             case TOKEN_EOF:
                 symbol = END;
                 break;
@@ -670,6 +748,14 @@ Node *parseExpression(Parser *parser) {
                     }
                     free(stack.el);
                     return NULL;
+                }
+
+                oprWanted = symbol != OPERAND && symbol != RPAREN; // diky tomu pozna a - -42 jako bin a druhe jako unarni
+
+                if (symbol == LPAREN) {
+                    depth++;
+                } else if (symbol == RPAREN) {
+                    depth--;
                 }
                 break;
 
@@ -741,7 +827,7 @@ Node *parseAssignment(Parser *parser,Node *id) {
         return NULL;
     }
 
-    Node *value = parseLiteral(parser); // potom parse expression
+    Node *value = parseExpression(parser);
     if (!value) {
         destroyAST(assign);
         return NULL;
@@ -767,8 +853,8 @@ Node *parseTerm(Parser *parser) {
         case TOKEN_INT_LITERAL:
         case TOKEN_DOUBLE_LITERAL:
         case TOKEN_STRING_LITERAL:
-            parseLiteral(parser);
-            break;
+            return parseLiteral(parser);
+
         case TOKEN_ID: {
             Node *id = parseId(parser);
             if (!id) {
@@ -779,8 +865,6 @@ Node *parseTerm(Parser *parser) {
             // if next one is ( -> function call
             if (checkType(parser, TOKEN_LPAREN)) {
                 return parseCall(parser, id);
-            } else if (checkType(parser, TOKEN_ASSIGN)) {
-                return parseAssignment(parser, id);
             }
 
             return id;
@@ -788,9 +872,203 @@ Node *parseTerm(Parser *parser) {
 
         default:
             handleError(&parser->error, SYN_ERROR, "Expected expression", parser->currentToken.lineNumber);
+            return NULL;
+    }
+
+}
+
+// BLOCK
+Node *parseBlock(Parser *parser) {
+    int line = parser->currentToken.lineNumber;
+
+    if (!want(parser, TOKEN_INDENT, "Expected indentation")) {
+        handleError(&parser->error, SYN_ERROR, "Expected indentation", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    Node *block = createAST(AST_BLOCK, line);
+    if (!block) return NULL;
+
+    while (!checkType(parser, TOKEN_DEDENT)) {
+        if (same(parser, TOKEN_EOF)) {
+            handleError(&parser->error, SYN_ERROR, "Expected eof", parser->currentToken.lineNumber);
+        }
+
+        Node *statement = parseStatement(parser);
+        if (!statement) {
+            destroyAST(block);
+            return NULL;
+        }
+        // todo: prevazat na list
+        List *statements = &block->data.block.statements;
+        bool insertStatement;
+
+        if (listIsEmpty(statements)) {
+            insertStatement = insertFirst(statements, &statement);
+        } else {
+            listLast(statements);
+            insertStatement = insertAfter(statements, &statement);
+        }
+
+        if (!insertStatement) {
+            destroyAST(statement);
+            return NULL;
+        }
+    }
+    parseNext(parser);
+    return block;
+}
+
+
+// FUNCTION
+Node *parseFunction(Parser *parser){
+
+    bool main = false;
+    char *id = NULL;
+
+    if (same(parser, TOKEN_ANNOTATION_MAIN)){
+        main = true;
+        // id = "main";
+    }
+
+    if (!want(parser, TOKEN_KW_DEF, "Expected 'def'")){
+        return NULL;
+    }
+
+    if (!checkType(parser, TOKEN_ID)){
+        handleError(&parser->error, SYN_ERROR, "Expected identifier", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    Node *fun = createAST(AST_FUNCTION, parser->currentToken.lineNumber);
+    if (!fun) {
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'fun'", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    fun->data.function.main = main;
+    fun->data.function.returnType = TYPE_UNSPECIFIED;
+    fun->data.function.id = copyStr(parser->currentToken.stringValue);
+
+    if (!fun->data.function.id) {
+        destroyAST(fun);
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to copy 'fun' id", parser->currentToken.lineNumber);
+        return NULL;
+    }
+    parseNext(parser);
+
+    if(!want(parser, TOKEN_LPAREN, "Expected '('") || !parseParams(parser, &fun->data.function.params) || !want(parser, TOKEN_RPAREN, "Expected ')'")){
+        destroyAST(fun);
+        return NULL;
+    }
+
+    if (same(parser, TOKEN_COLON) && !parseType(parser, &fun->data.function.returnType)) {
+        destroyAST(fun);
+        return NULL;
+    }
+
+    if (!want(parser, TOKEN_ASSIGN, "Expected '='")) {
+        destroyAST(fun);
+        return NULL;
+    }
+
+    if (same(parser, TOKEN_EOL)) {
+        fun->data.function.body = parseBlock(parser); // block function definition -> block
+    } else {
+        fun->data.function.body = parseExpression(parser); // inline definition -> expr nb call
+    }
+
+    if (!fun->data.function.body) {
+        destroyAST(fun);
+        return NULL;
+    }
+
+    return fun;
+}
+
+bool parseParams(Parser *parser, List *params) {
+    if (checkType(parser, TOKEN_RPAREN)) return true;
+
+    while (true) {
+        if (!checkType(parser, TOKEN_ID)) {
+            handleError(&parser->error, SYN_ERROR, "Expected param identifier", parser->currentToken.lineNumber);
+            return false;
+        }
+
+        Node *param = createAST(AST_PARAM, parser->currentToken.lineNumber);
+        if (!param) return false;
+
+        param->data.parameter.symbol = NULL;
+        param->data.parameter.id = copyStr(parser->currentToken.stringValue);
+
+        if (!param->data.parameter.id) {
+            destroyAST(param);
+            return false;
+        }
+        parseNext(parser);
+        if (parser->error.code != SUCCESS) {
+            destroyAST(param);
+            return false;
+        }
+
+        if (!want(parser, TOKEN_COLON, "Expected ':'") || !parseType(parser, &param->data.parameter.declType)) {
+            destroyAST(param);
+            return false;
+        }
+
+        // list z params
+        bool insertParam;
+
+        if (listIsEmpty(params)) {
+            insertParam = insertFirst(params, &param);
+        } else {
+            listLast(params);
+            insertParam = insertAfter(params, &param);
+        }
+
+        if (!insertParam) {
+            destroyAST(param);
+            return false;
+        }
+
+        if (checkType(parser, TOKEN_RPAREN)) return true;
+
+        if (!want(parser, TOKEN_COMMA, "Expected ',' or ')'")) {
+            return false;
+        }
+    }
+}
+
+// data type
+bool parseType(Parser *parser, DeclType *type) {
+    DeclType dtype = TYPE_UNSPECIFIED;
+
+    switch (parser->currentToken.type) {
+        case TOKEN_TYPE_INT:
+            dtype = TYPE_INT;
+            break;
+        case TOKEN_TYPE_DOUBLE:
+            dtype = TYPE_DOUBLE;
+            break;
+        case TOKEN_TYPE_STRING:
+            dtype = TYPE_STRING;
+            break;
+        case TOKEN_TYPE_UNIT:
+            dtype = TYPE_UNIT;
+            break;
+
+        default:
+            handleError(&parser->error, SYN_ERROR, "Expected decl data type", parser->currentToken.lineNumber);
+            return false;
             break;
     }
 
+    parseNext(parser);
+
+    if (parser->error.code != SUCCESS) return false;
+
+    *type = dtype;
+    return true;
 }
 
 // STATEMENT
