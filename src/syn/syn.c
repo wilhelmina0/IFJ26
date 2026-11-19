@@ -6,7 +6,7 @@
  * and then creates AST nodes.
  *
  * @authors
- * - Bára Wilhelmová(xwilheb00)
+ * - Bára Wilhelmová (xwilheb00)
  *
  */
 
@@ -447,26 +447,33 @@ Node *parseCall(Parser *parser, Node *id) {
 }
 
 /* ======================== PRECEDENCE ============================== */
-static const char precedenceTable[6][6] = {
+static const char precedenceTable[9][9] = {
     // > ... reduce - neposouvej hranici redukuj vstup nespotrebuj token
     // < ... shift - vloz hranici a vstup
     // ! ... invalid operation combination
     // = ... insert input and shift
     // E ... end state
 
-    // operand add_sub mul_div lparen rparen end
+    // INPUT: neg operand add_sub mul_div lparen rparen comp equal end
+    // ON STACK:
+    // neg
+    {'<', '<', '>', '>', '<', '>', '>', '>', '>'},
     // operand
-    {'!', '>', '>', '!', '>', '>'},
+    {'!', '!', '>', '>', '!', '>', '>', '>', '>'},
     // add_sub
-    {'<', '>', '<', '<', '>', '>'},
+    {'<', '<', '>', '<', '<', '>', '>', '>', '>'},
     // mul_div
-    {'<', '>', '>', '<', '>', '>'},
+    {'<','<', '>', '>', '<', '>', '>', '>', '>'},
     // lparen
-    {'<', '<', '<', '<', '=', '!'},
+    {'<', '<', '<', '<', '<', '=', '<', '<','!'},
     // rparen
-    {'!', '>', '>', '!', '>', '>'},
+    {'!','!', '>', '>', '!', '>', '>', '>', '>'},
+    // comp
+    {'<', '<', '<', '<', '<', '>', '!', '>', '>'},
+    // equal
+    {'<', '<', '<', '<', '<', '>', '<', '!', '>'},
     // end
-    {'<', '<', '<', '<', '!', 'E'},
+    {'<', '<', '<', '<', '<', '!', '<', '<', 'E'},
 };
 
 /**
@@ -493,7 +500,7 @@ bool shiftStack(Parser *parser, Stack *stack, char action, OpSymbol symbol, size
     }
     StackEl item = {.symbol = symbol,.op = token->type, .node = NULL, .line = token->lineNumber}; // input el
     if (item.symbol == OPERAND) {
-        item.node = parseLiteral(parser);
+        item.node = parseTerm(parser); // parseLiteral()
         if (!item.node) {
             return false;
         }
@@ -548,13 +555,51 @@ bool reduceStack(Parser *parser, Stack *stack) {
         return true;
     }
 
+    // () -> unit
+    if (count == 2 && stack->el[borderIdx + 1].symbol == LPAREN && stack->el[borderIdx + 2].symbol == RPAREN) {
+        Node *unit = createAST(AST_UNIT, stack->el[borderIdx + 1].line); // UNIT basically an empty expr
+        if (!unit) {
+            handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'unit' node", stack->el[borderIdx + 1].line);
+            return false;
+        }
+
+        stack->el[borderIdx].node = unit;
+        stack->el[borderIdx].symbol = EXPR;
+        stack->el[borderIdx].line = stack->el[borderIdx + 1].line;
+
+        stack->top = borderIdx + 1;
+        return true;
+    }
+
+    if (count == 2 && stack->el[borderIdx + 1].symbol == NEG && stack->el[borderIdx + 2].symbol == EXPR) {
+        StackEl *sign = &stack->el[borderIdx + 1];
+        StackEl *num = &stack->el[borderIdx + 2];
+
+        Node *unary = createAST(AST_UNARY, sign->line);
+        if (!unary) {
+            handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'unary' node", sign->line);
+            return false;
+        }
+
+        unary->data.unary.op = sign->op;
+        unary->data.unary.operand = num->node;
+
+        stack->el[borderIdx].node = unary;
+        stack->el[borderIdx].line = sign->line;
+        stack->el[borderIdx].symbol = EXPR;
+
+        stack->top = borderIdx + 1;
+        return true;
+    }
+
     // expr operator expr
     if (count == 3) {
         StackEl *left = &stack->el[borderIdx + 1];
         StackEl *mid = &stack->el[borderIdx + 2];
         StackEl *right = &stack->el[borderIdx + 3];
 
-        if (left->symbol == EXPR && right->symbol == EXPR && (mid->symbol == ADD_SUB || mid->symbol == MUL_DIV)) {
+        if (left->symbol == EXPR && right->symbol == EXPR &&
+            (mid->symbol == ADD_SUB || mid->symbol == MUL_DIV || mid->symbol == COMP || mid->symbol == EQUAL)) {
             // ast here
             Node *bin = createAST(AST_BINARY, mid->line);
             if (!bin) {
@@ -575,7 +620,7 @@ bool reduceStack(Parser *parser, Stack *stack) {
         }
 
         // (expr) -> expr
-        if (left->symbol == LPAREN && right->symbol == RPAREN && mid->symbol ==  EXPR) {
+        if (left->symbol == LPAREN && mid->symbol ==  EXPR && right->symbol == RPAREN ) {
             StackEl result = *mid;
 
             stack->el[borderIdx] = result;
@@ -604,7 +649,8 @@ Node *parseExpression(Parser *parser) {
     Stack stack;
     OpSymbol symbol;
     StackEl bottom = {.symbol = END, .line = 0};
-
+    int depth = 0;
+    bool oprWanted = true; // expecting an operand
 
     initStack(&stack);
     if (!pushStack(&stack, bottom)) {
@@ -616,12 +662,29 @@ Node *parseExpression(Parser *parser) {
         switch (token->type) {
             case TOKEN_PLUS:
             case TOKEN_MINUS:
-                symbol = ADD_SUB;
+                symbol = oprWanted ? NEG : ADD_SUB; // neg ma stejnou precedenci jako unarni + a -
                 break;
+            // todo: lex chybi ! token
+            /*
+                case TOKEN_NOT:
+                symbol = NEG;
+                break;
+            */
             case TOKEN_MUL:
             case TOKEN_DIV:
                 symbol = MUL_DIV;
                 break;
+            case TOKEN_LT:
+            case TOKEN_LTE:
+            case TOKEN_GT:
+            case TOKEN_GTE:
+                symbol = COMP;
+                break;
+            case TOKEN_EQ:
+            case TOKEN_NEQ:
+                symbol = EQUAL;
+                break;
+            case TOKEN_ID:
             case TOKEN_INT_LITERAL:
             case TOKEN_DOUBLE_LITERAL:
             case TOKEN_STRING_LITERAL:
@@ -631,8 +694,11 @@ Node *parseExpression(Parser *parser) {
                 symbol = LPAREN;
                 break;
             case TOKEN_RPAREN:
-                symbol = RPAREN;
+                symbol = depth == 0 ? END : RPAREN;
                 break;
+            case TOKEN_DEDENT:
+            case TOKEN_COMMA:
+            case TOKEN_EOL:
             case TOKEN_EOF:
                 symbol = END;
                 break;
@@ -670,6 +736,14 @@ Node *parseExpression(Parser *parser) {
                     }
                     free(stack.el);
                     return NULL;
+                }
+
+                oprWanted = symbol != OPERAND && symbol != RPAREN; // diky tomu pozna a - -42 jako bin a druhe jako unarni
+
+                if (symbol == LPAREN) {
+                    depth++;
+                } else if (symbol == RPAREN) {
+                    depth--;
                 }
                 break;
 
@@ -741,7 +815,7 @@ Node *parseAssignment(Parser *parser,Node *id) {
         return NULL;
     }
 
-    Node *value = parseLiteral(parser); // potom parse expression
+    Node *value = parseExpression(parser);
     if (!value) {
         destroyAST(assign);
         return NULL;
