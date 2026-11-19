@@ -112,13 +112,13 @@ void freeToken(Token *token) {
         // only for tokens that use strdup() in LEX
         case TOKEN_ID:
         case TOKEN_STRING_LITERAL:
-            free(token->stringValue);
+            free(token->val.stringValue);
             break;
         default:
             break;
     }
     token->type = TOKEN_EOF; // lowers the risk of double free
-    token->stringValue = NULL;
+    token->val.stringValue = NULL;
 }
 
 /**
@@ -134,7 +134,7 @@ void parserInit(Parser *parser) {
 
     // compound literal that uses designated initializer -> creates temporary object Token whose value we assign to prev
     parser->previousToken = (Token){.type = TOKEN_EOF}; // we need to initialize it so we can safely call freeToken
-    parser->currentToken = nextToken();
+    parser->currentToken = nextToken(&parser->error);
 }
 
 // syn cleanup - lex transfers ownership -> syn has to free tokens
@@ -229,25 +229,20 @@ char *copyStr(const char *str) {
  */
 bool parseProlog(Parser *parser) {
 
-    if(!want(parser, TOKEN_KW_IMPORT, "Invalid prolog: Expected 'import'")){
+    if(!want(parser, TOKEN_KW_IMPORT, "Invalid prolog: Expected 'import'")) return false;
+
+
+    if(!checkType(parser, TOKEN_ID) || strcmp(parser->currentToken.val.stringValue,"ifj26") != 0) {
+        handleError(&parser->error, SYN_ERROR, "Expected 'ifj26' after 'import'", parser->currentToken.lineNumber);
         return false;
     }
+    parseNext(parser);
 
-    if(!want(parser, TOKEN_ID, "Invalid prolog: Expected 'ifj26'")){
-        return false;
-    }
+    if(!want(parser, TOKEN_DOT, "Invalid prolog: Expected '.'")) return false;
 
-    if(!want(parser, TOKEN_DOT, "Invalid prolog: Expected '.'")){
-        return false;
-    }
+	if(!want(parser, TOKEN_MUL, "Invalid prolog: Expected '*'")) return false;
 
-	if(!want(parser, TOKEN_MUL, "Invalid prolog: Expected '*'")){
-        return false;
-	}
-
-    if(!want(parser, TOKEN_EOL, "Expected end of prolog line")){
-        return false;
-    }
+    if(!want(parser, TOKEN_EOL, "Expected end of prolog line")) return false;
 
     return true;
 }
@@ -325,15 +320,15 @@ Node *parseLiteral(Parser *parser) {
 
     switch (type) {
         case AST_INT:
-            literal->data.intLiteral.value = token->intValue;
+            literal->data.intLiteral.value = token->val.intValue;
             break;
 
         case AST_DOUBLE:
-            literal->data.doubleLiteral.value = token->doubleValue;
+            literal->data.doubleLiteral.value = token->val.doubleValue;
             break;
 
         case AST_STRING:
-            literal->data.stringLiteral.string = copyStr(token->stringValue);
+            literal->data.stringLiteral.string = copyStr(token->val.stringValue);
             if(!literal->data.stringLiteral.string) {
                 handleError(&parser->error, INTERNAL_ERROR, "Allocation of string copy AST node failed", parser->currentToken.lineNumber);
                 destroyAST(literal);
@@ -368,7 +363,7 @@ Node *parseId(Parser *parser) {
         return NULL;
     }
 
-    id->data.identifier.id = copyStr(parser->currentToken.stringValue);
+    id->data.identifier.id = copyStr(parser->currentToken.val.stringValue);
     if (!id->data.identifier.id) {
         handleError(&parser->error, INTERNAL_ERROR, "Failed to make a copy of identifier", parser->currentToken.lineNumber);
         destroyAST(id);
@@ -963,7 +958,7 @@ Node *parseFunction(Parser *parser){
 
     fun->data.function.main = main;
     fun->data.function.returnType = TYPE_UNSPECIFIED;
-    fun->data.function.id = copyStr(parser->currentToken.stringValue);
+    fun->data.function.id = copyStr(parser->currentToken.val.stringValue);
 
     if (!fun->data.function.id) {
         destroyAST(fun);
@@ -1016,7 +1011,7 @@ bool parseParams(Parser *parser, List *params) {
         if (!param) return false;
 
         param->data.parameter.symbol = NULL;
-        param->data.parameter.id = copyStr(parser->currentToken.stringValue);
+        param->data.parameter.id = copyStr(parser->currentToken.val.stringValue);
 
         if (!param->data.parameter.id) {
             destroyAST(param);

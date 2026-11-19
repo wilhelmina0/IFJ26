@@ -11,9 +11,10 @@
 #ifndef SYN_INIT_H
 #define SYN_INIT_H
 
-#include "../lex/init.h"   // temporary -> token has to be shared
-#include "../ast/ast.h"    // AST structure
+#include "../lex/init.h"
 #include "../core/error.h" // error handling
+#include "../ast/ast.h"    // AST structure
+
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -35,7 +36,7 @@ void freeToken(Token *token);   // for tokens that use strdup()
 void synClean(Parser *parser);  // when parser is finished
 
 void parserInit(Parser *parser);  // sets the current token w/ nextToken() from lex
-void parseNext(Parser *parser);   // moves onto the next token
+bool parseNext(Parser *parser);   // moves onto the next token
 
 bool checkType(Parser *parser, TokenType type);                // checks the token type
 bool same(Parser *parser, TokenType type);                      // checks type moves onto next
