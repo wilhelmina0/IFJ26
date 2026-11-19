@@ -397,13 +397,32 @@ Node *parseCall(Parser *parser, Node *id) {
                 handleError(&parser->error, SYN_ERROR, "Expected argument", line);
                 return NULL;
             }
+            // args as list
+            List *args = &call->data.call.args;
+            bool insertArg;
 
+            if (listIsEmpty(args)) {
+                insertArg = insertFirst(args, &arg);
+            } else {
+                listLast(args);
+                insertArg = insertAfter(args, &arg);
+            }
+
+            if (!insertArg) {
+                destroyAST(arg);
+                destroyAST(call);
+                handleError(&parser->error, INTERNAL_ERROR, "Failed to add argument", line);
+                return false;
+            }
+
+            /* old varianta pres children
             if (!addChild(call, arg)) {
                 handleError(&parser->error, INTERNAL_ERROR, "Failed to add child node", line);
                 destroyAST(arg);
                 destroyAST(call);
                 return NULL;
             }
+            */
         } while (same(parser, TOKEN_COMMA));
 
     }
