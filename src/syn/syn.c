@@ -664,6 +664,8 @@ Node *parseExpression(Parser *parser) {
     int depth = 0;
     bool oprWanted = true; // expecting an operand
 
+    if (parser->error.code != SUCCESS) return NULL;
+
     initStack(&stack);
     if (!pushStack(&stack, bottom)) {
         handleError(&parser->error, INTERNAL_ERROR, "Failed to push stack", line);
@@ -890,8 +892,10 @@ Node *parseBlock(Parser *parser) {
     if (!block) return NULL;
 
     while (!checkType(parser, TOKEN_DEDENT)) {
-        if (same(parser, TOKEN_EOF)) {
+        if (checkType(parser, TOKEN_EOF)) {
             handleError(&parser->error, SYN_ERROR, "Expected eof", parser->currentToken.lineNumber);
+            destroyAST(block);
+            return NULL;
         }
 
         Node *statement = parseStatement(parser);
@@ -976,6 +980,7 @@ Node *parseFunction(Parser *parser){
         fun->data.function.body = parseBlock(parser); // block function definition -> block
     } else {
         fun->data.function.body = parseExpression(parser); // inline definition -> expr nb call
+        want(parser, TOKEN_EOL, "Expected EOL after function body");
     }
 
     if (!fun->data.function.body) {
@@ -986,6 +991,7 @@ Node *parseFunction(Parser *parser){
     return fun;
 }
 
+// PARAMS
 bool parseParams(Parser *parser, List *params) {
     if (checkType(parser, TOKEN_RPAREN)) return true;
 
@@ -1071,6 +1077,84 @@ bool parseType(Parser *parser, DeclType *type) {
     return true;
 }
 
+// VAR DECLARATION
+Node *parseDecl(Parser *parser) {
+    bool changes = checkType(parser, TOKEN_KW_VAR); // 1 -> mutable var, 0 -> nonmutable val
+
+    /*
+    if (checkType(parser, TOKEN_KW_VAL)) {
+        changes = false;
+    } else if (checkType(parser, TOKEN_KW_VAR)) {
+        changes = true;
+    }
+    */
+    parseNext(parser);
+
+    if (!checkType(parser, TOKEN_ID)) {
+        handleError(&parser->error, SYN_ERROR, "Expected identifier", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    Node *decl = createAST(AST_VARDECL, parser->currentToken.lineNumber);
+    if (!decl) {
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate var decl node", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    decl->data.varDeclaration.id = copyStr(parser->currentToken.val.stringValue);
+    if (!decl->data.varDeclaration.id) {
+        destroyAST(decl);
+        handleError(&parser->error, SYN_ERROR, "Failed to copy variable id", parser->currentToken.lineNumber);
+    }
+    decl->data.varDeclaration.mutable = changes;
+    decl->data.varDeclaration.declType = TYPE_UNSPECIFIED;
+    decl->data.varDeclaration.initializer = NULL;
+
+    parseNext(parser);
+
+    // : means that we expect declared type, otherwise sem must recognize type based on initializer value
+    if (same(parser, TOKEN_COLON) && !parseType(parser, &decl->data.varDeclaration.declType)) {
+        destroyAST(decl);
+        return NULL;
+    }
+
+    if (!want(parser, TOKEN_ASSIGN, "Expected '='")) {
+        destroyAST(decl);
+        return NULL;
+    }
+
+    decl->data.varDeclaration.initializer = parseExpression(parser);
+    if (!decl->data.varDeclaration.initializer) {
+        destroyAST(decl);
+        return NULL;
+    }
+    return decl;
+}
+
+// RETURN
+Node *parseReturn(Parser *parser) {
+    int line = parser->currentToken.lineNumber;
+    parseNext(parser); // consumes return kw
+
+    Node *node = createAST(AST_RETURN, line);
+    if (!node) {
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate return node", line);
+        return NULL;
+    }
+
+    node->data.returnNode.value = NULL;
+
+    if (!checkType(parser, TOKEN_EOL)) {
+        node->data.returnNode.value = parseExpression(parser);
+
+        if (!node->data.returnNode.value) {
+            destroyAST(node);
+            return NULL;
+        }
+    }
+
+    return node;
+}
 // STATEMENT
 Node *parseStatement(Parser *parser) {
     if (checkType(parser, TOKEN_ID))

@@ -50,6 +50,9 @@ Node *parseCall(Parser *parser, Node *id);    // for function calls (print, ...)
 Node *parseExpression(Parser *parser); // expr
 Node *parseAssignment(Parser *parser, Node *id); // assign
 
+Node *parseReturn(Parser *parser);
+Node *parseDecl(Parser *parser);
+
 Node *parseStatement(Parser *parser);
 
 bool parseParams(Parser *parser, List *params);
