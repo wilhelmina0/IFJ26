@@ -712,6 +712,8 @@ Node *parseExpression(Parser *parser) {
                 break;
             case TOKEN_DEDENT:
             case TOKEN_COMMA:
+            case TOKEN_KW_DO:
+            case TOKEN_KW_THEN:
             case TOKEN_EOL:
             case TOKEN_EOF:
                 symbol = END;
@@ -1152,6 +1154,90 @@ Node *parseReturn(Parser *parser) {
             return NULL;
         }
     }
+
+    return node;
+}
+
+// WHILE
+Node *parseWhile(Parser *parser) {
+    parseNext(parser); // consumes while kw
+
+    Node *cond = parseExpression(parser);
+    if (!cond) return NULL;
+
+    if (!want(parser, TOKEN_KW_DO, "Expected do after while") || !want(parser, TOKEN_EOL, "Expected EOL after do")) {
+        destroyAST(cond);
+        return NULL;
+    }
+
+    Node *body = parseBlock(parser);
+    if (!body) {
+        destroyAST(cond);
+        return NULL;
+    }
+
+    Node *cycle = createAST(AST_WHILE, parser->currentToken.lineNumber);
+    if (!cycle) {
+        destroyAST(cond);
+        destroyAST(body);
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate while loop", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    cycle->data.whileNode.cond = cond;
+    cycle->data.whileNode.body = body;
+    return cycle;
+}
+
+// IF
+Node *parseIf(Parser *parser) {
+    int line = parser->currentToken.lineNumber;
+    parseNext(parser); // consumes if kw
+
+    Node *cond = parseExpression(parser);
+    if (!cond) return NULL;
+
+    if (!want(parser, TOKEN_KW_THEN, "Expected then after if")) {
+        destroyAST(cond);
+        return NULL;
+    }
+
+    if (!want(parser, TOKEN_EOL, "Expected EOL after if then")) {
+        destroyAST(cond);
+        return NULL;
+    }
+
+    Node *then = parseBlock(parser);
+    if (!then) {
+        destroyAST(cond);
+        return NULL;
+    }
+
+    if (!want(parser, TOKEN_KW_ELSE, "Expected else after if then") || !want(parser, TOKEN_EOL, "Expected EOL after else")) {
+        destroyAST(cond);
+        destroyAST(then);
+        return NULL;
+    }
+
+    Node *elseBranch = parseBlock(parser);
+    if (!elseBranch) {
+        destroyAST(cond);
+        destroyAST(then);
+        return NULL;
+    }
+
+    Node *node = createAST(AST_IF, line);
+    if (!node) {
+        destroyAST(cond);
+        destroyAST(then);
+        destroyAST(elseBranch);
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate if node", line);
+        return NULL;
+    }
+
+    node->data.ifNode.cond = cond;
+    node->data.ifNode.branchThen = then;
+    node->data.ifNode.branchElse = elseBranch;
 
     return node;
 }

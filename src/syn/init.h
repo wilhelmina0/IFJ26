@@ -62,6 +62,9 @@ Node *parseLiteral(Parser *parser);
 Node *parseTerm(Parser *parser);
 Node *parseId(Parser *parser);
 
+Node *parseIf(Parser *parser);
+Node *parseWhile(Parser *parser);
+
 /* ======================== PRECEDENCE ========================== */
 // for expressions
 typedef enum {
