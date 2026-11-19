@@ -251,11 +251,34 @@ bool parseProlog(Parser *parser) {
  * @return node of program on success else NULL
  */
 Node *parseProgram(Parser *parser) {
+    int line = parser->currentToken.lineNumber;
     if(!parseProlog(parser)) return NULL;
-    if(!parseFunction(parser)) return NULL;
-    if(!checkType(parser, TOKEN_EOF)) return NULL;
 
-    Node *program = createAST(AST_PROGRAM, parser->currentToken.lineNumber);
+    Node *program = createAST(AST_PROGRAM, line);
+    if (!program) {
+        handleError(&parser->error, INTERNAL_ERROR, "Allocation of program node failed", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    Node *fun = parseFunction(parser);
+    if (!fun) {
+        destroyAST(program);
+        return NULL;
+    }
+
+    if (!insertFirst(&program->data.program.declarations, &fun)) {
+        destroyAST(fun);
+        destroyAST(program);
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to add function declaration", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
+    if(!checkType(parser, TOKEN_EOF)) {
+        destroyAST(program);
+        handleError(&parser->error, SYN_ERROR, "Expected end of file", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
     return program; // vraci root node ast
 }
 
