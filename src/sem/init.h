@@ -15,7 +15,7 @@
 
 #include "../core/error.h"
 
-typedef struct Node Node;
+//typedef struct Node Node;
 
 /** Details of the first error found during semantic analysis. */
 typedef struct {

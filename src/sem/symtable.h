@@ -14,22 +14,11 @@
 #define SYMTABLE_H
 
 #include "../core/error.h"
+#include "../ast/ast.h"
 #include <stdbool.h>
 #include <stddef.h>
 
-/** Types shared by AST nodes and semantic analysis. */
-typedef enum {
-    TYPE_UNKNOWN, /**< No annotation, or a result not inferred yet. */
-    TYPE_INT,
-    TYPE_DOUBLE,
-    TYPE_STRING,
-    TYPE_UNIT,
-    TYPE_BOOL, /**< Internal condition result in basic IFJ26. */
-    TYPE_ANY, /**< Built-in function parameter accepting any user type. */
-    TYPE_INVALID /**< An explicit type name that the language does not define. */
-} DataType;
-
-typedef struct Node Node;
+//typedef struct Node Node;
 typedef struct SymTable SymTable;
 
 typedef enum { SYMBOL_VARIABLE, SYMBOL_FUNCTION } SymbolKind;
@@ -37,7 +26,7 @@ typedef enum { SYMBOL_VARIABLE, SYMBOL_FUNCTION } SymbolKind;
 /** A symbol record copied into and out of the table. */
 typedef struct {
     SymbolKind kind;
-    DataType type;
+    DeclType type;
     bool mutable;
     size_t id;
     Node *declaration; /**< Borrowed pointer; never freed by the table. */
