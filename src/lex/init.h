@@ -1,12 +1,12 @@
 /**
- * @file init.h
+* @file init.h
  * @brief Public interface for the lexical analyzer
- * 
+ *
  * Exposes the nextToken() function prototype for the syntax analyzer.
- * 
+ *
  * @authors
  * - Tadeáš Vykopal (xvykopt00)
- * 
+ *
  * @date 2026
  */
 
@@ -26,4 +26,4 @@
 */
 Token nextToken(Error *err);
 
-#endif //INIT_H
+#endif // LEX_INIT_H
