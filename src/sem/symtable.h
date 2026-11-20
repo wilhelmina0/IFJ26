@@ -15,7 +15,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include "../ast/ast.h"
+#include "../ast.h"
 #include "../error.h"
 
 //typedef struct Node Node;
