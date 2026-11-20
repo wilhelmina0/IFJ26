@@ -11,9 +11,9 @@
 #ifndef SYN_INIT_H
 #define SYN_INIT_H
 
-#include "../ast.h"
-#include "../error.h"
-#include "../lex/lex.h"
+#include "lex.h"
+#include "ast.h"
+#include "error.h"
 
 
 #include <stdbool.h>
