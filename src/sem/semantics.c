@@ -46,23 +46,23 @@ typedef struct {
 } Context;
 
 typedef struct {
-    DataType type;
+    DeclType type;
     bool returns; // Whether the final statement ends in return on all branches.
     bool unitTail; // Whether all branches of a trailing if produce Unit.
 } Flow;
 
 typedef struct {
     const char *name;
-    DataType result;
+    DeclType result;
     size_t count;
-    DataType params[3];
+    DeclType params[3];
 } Builtin;
 
 static const Builtin builtins[] = {
     { "print", TYPE_UNIT, 1, { TYPE_ANY } },
-    { "readLine", TYPE_STRING, 0, { TYPE_UNKNOWN } },
-    { "readInt", TYPE_INT, 0, { TYPE_UNKNOWN } },
-    { "readDouble", TYPE_DOUBLE, 0, { TYPE_UNKNOWN } },
+    { "readLine", TYPE_STRING, 0, { TYPE_UNSPECIFIED } },
+    { "readInt", TYPE_INT, 0, { TYPE_UNSPECIFIED } },
+    { "readDouble", TYPE_DOUBLE, 0, { TYPE_UNSPECIFIED } },
     { "toStr", TYPE_STRING, 1, { TYPE_ANY } },
     { "toInt", TYPE_INT, 1, { TYPE_DOUBLE } },
     { "strLength", TYPE_INT, 1, { TYPE_STRING } },
@@ -71,7 +71,7 @@ static const Builtin builtins[] = {
     { "chr", TYPE_STRING, 1, { TYPE_INT } },
 };
 
-static DataType checkExpression(Context *ctx, Node *node, bool allowCall, bool inCondition);
+static DeclType checkExpression(Context *ctx, Node *node, bool allowCall, bool inCondition);
 static Flow checkStatement(Context *ctx, Node *node);
 static Flow checkBlock(Context *ctx, Node *node, bool newScope);
 static void checkFunction(Context *ctx, FunctionInfo *info);
@@ -87,22 +87,22 @@ static void fail(Context *ctx, ErrorCode code, const Node *node, const char *mes
 }
 
 /** @brief Checks whether a type is available in the basic language. */
-static bool isUserType(DataType type)
+static bool isUserType(DeclType type)
 {
     return type == TYPE_INT || type == TYPE_DOUBLE || type == TYPE_STRING || type == TYPE_UNIT;
 }
 
 /** @brief Checks whether a type is numeric. */
-static bool isNumeric(DataType type) { return type == TYPE_INT || type == TYPE_DOUBLE; }
+static bool isNumeric(DeclType type) { return type == TYPE_INT || type == TYPE_DOUBLE; }
 
 /**
  * @brief Checks whether a value matches the expected type.
  *
  * Marks an Int to Double conversion in the AST when needed.
  */
-static bool compatible(Node *value, DataType actual, DataType expected)
+static bool compatible(Node *value, DeclType actual, DeclType expected)
 {
-    if (!value || actual == TYPE_UNKNOWN) {
+    if (!value || actual == TYPE_UNSPECIFIED) {
         return false;
     }
     if (actual == expected || expected == TYPE_ANY) {
@@ -152,7 +152,7 @@ static bool findVariable(Context *ctx, const char *name, Symbol *symbol)
  * Stores its type, mutability and identifier, and writes the identifier to the AST.
  * The symbol table rejects duplicate names in the same scope.
  */
-static void defineVariable(Context *ctx, Node *node, const char *name, DataType type, bool mutable)
+static void defineVariable(Context *ctx, Node *node, const char *name, DeclType type, bool mutable)
 {
     if (!node || !name || !ctx->scope || ctx->nextId == 0) {
         fail(ctx, INTERNAL_ERROR, node, "Invalid declaration in AST.");
@@ -193,17 +193,17 @@ static bool isTerm(const Node *node)
  * Resolves the function and checks the argument count and types.
  * Analyzes the called function when its return type is not known yet.
  */
-static DataType checkCall(Context *ctx, Node *node)
+static DeclType checkCall(Context *ctx, Node *node)
 {
     const char *name = node->data.call.id;
     if (!name) {
         fail(ctx, INTERNAL_ERROR, node, "Function call has no name.");
-        return TYPE_UNKNOWN;
+        return TYPE_UNSPECIFIED;
     }
     Symbol symbol;
     if (findVariable(ctx, name, &symbol)) {
         fail(ctx, SEM_ERROR_UNDEFINED, node, "Local name does not refer to a callable function.");
-        return TYPE_UNKNOWN;
+        return TYPE_UNSPECIFIED;
     }
     Node *function = NULL;
     FunctionInfo *info = NULL;
@@ -222,34 +222,34 @@ static DataType checkCall(Context *ctx, Node *node)
     }
     if (!function && !builtin) {
         fail(ctx, SEM_ERROR_UNDEFINED, node, "Undefined function.");
-        return TYPE_UNKNOWN;
+        return TYPE_UNSPECIFIED;
     }
     size_t count = function ? function->childCount - 1 : builtin->count;
     if (node->childCount != count) {
         fail(ctx, SEM_ERROR_INVALID, node, "Invalid number of arguments.");
-        return TYPE_UNKNOWN;
+        return TYPE_UNSPECIFIED;
     }
     for (size_t i = 0; i < count && ctx->error.code == SUCCESS; ++i) {
         Node *arg = node->children[i];
         if (!isTerm(arg)) {
             fail(ctx, SYN_ERROR, arg, "Arguments must be terms without the FUNEXP extension.");
-            return TYPE_UNKNOWN;
+            return TYPE_UNSPECIFIED;
         }
-        DataType actual = checkExpression(ctx, arg, false, false);
-        DataType expected
+        DeclType actual = checkExpression(ctx, arg, false, false);
+        DeclType expected
             = function ? function->children[i]->data.parameter.declaredType : builtin->params[i];
         if (!compatible(arg, actual, expected)) {
             fail(ctx, SEM_ERROR_INVALID, arg, "Invalid argument type.");
         }
     }
     if (ctx->error.code != SUCCESS) {
-        return TYPE_UNKNOWN;
+        return TYPE_UNSPECIFIED;
     }
     if (!function) {
         return builtin->result;
     }
     if (info->state == FUNCTION_CHECKING) {
-        if (function->data.function.returnType == TYPE_UNKNOWN) {
+        if (function->data.function.returnType == TYPE_UNSPECIFIED) {
             fail(ctx, SEM_ERROR_NOMATCH, function, "Recursion requires an explicit return type.");
         }
         if (info->index < ctx->current->lowLink) {
@@ -273,17 +273,17 @@ static DataType checkCall(Context *ctx, Node *node)
  *
  * Marks numeric conversions when needed. Actual values are evaluated at runtime.
  */
-static DataType checkBinary(Context *ctx, Node *node)
+static DeclType checkBinary(Context *ctx, Node *node)
 {
     Node *left = node->data.binary.left;
     Node *right = node->data.binary.right;
-    DataType leftType = checkExpression(ctx, left, false, false);
+    DeclType leftType = checkExpression(ctx, left, false, false);
     if (ctx->error.code != SUCCESS) {
-        return TYPE_UNKNOWN;
+        return TYPE_UNSPECIFIED;
     }
-    DataType rightType = checkExpression(ctx, right, false, false);
+    DeclType rightType = checkExpression(ctx, right, false, false);
     if (ctx->error.code != SUCCESS) {
-        return TYPE_UNKNOWN;
+        return TYPE_UNSPECIFIED;
     }
     TokenType op = node->data.binary.op;
     bool numbers = isNumeric(leftType) && isNumeric(rightType);
@@ -324,10 +324,10 @@ static DataType checkBinary(Context *ctx, Node *node)
         break;
     default:
         fail(ctx, INTERNAL_ERROR, node, "Unknown operator in AST.");
-        return TYPE_UNKNOWN;
+        return TYPE_UNSPECIFIED;
     }
     fail(ctx, SEM_ERROR_NOMATCH, node, "Incompatible operand types.");
-    return TYPE_UNKNOWN;
+    return TYPE_UNSPECIFIED;
 }
 
 /**
@@ -335,18 +335,18 @@ static DataType checkBinary(Context *ctx, Node *node)
  *
  * Resolves variable identifiers and checks whether calls are allowed here.
  */
-static DataType checkExpression(Context *ctx, Node *node, bool allowCall, bool inCondition)
+static DeclType checkExpression(Context *ctx, Node *node, bool allowCall, bool inCondition)
 {
     if (ctx->error.code != SUCCESS) {
-        return TYPE_UNKNOWN;
+        return TYPE_UNSPECIFIED;
     }
     if (!node || (node->childCount > 0 && !node->children)) {
         fail(ctx, INTERNAL_ERROR, node, "Invalid expression children in AST.");
-        return TYPE_UNKNOWN;
+        return TYPE_UNSPECIFIED;
     }
     node->convertToDouble = false;
     node->symbolId = 0;
-    DataType type = TYPE_UNKNOWN;
+    DeclType type = TYPE_UNSPECIFIED;
     Symbol symbol;
     switch (node->type) {
     case AST_INT:
@@ -423,8 +423,8 @@ static Flow checkReturn(Context *ctx, Node *node)
         fail(ctx, INTERNAL_ERROR, node, "Invalid return statement in AST.");
         return flow;
     }
-    DataType expected = ctx->function->data.function.returnType;
-    if (expected == TYPE_UNKNOWN) {
+    DeclType expected = ctx->function->data.function.returnType;
+    if (expected == TYPE_UNSPECIFIED) {
         fail(ctx, SEM_ERROR_NOMATCH, node, "Return requires an explicit function return type.");
         return flow;
     }
@@ -434,7 +434,7 @@ static Flow checkReturn(Context *ctx, Node *node)
         }
     } else {
         Node *value = node->children[0];
-        DataType actual = checkExpression(ctx, value, true, false);
+        DeclType actual = checkExpression(ctx, value, true, false);
         if (expected != TYPE_UNIT && !compatible(value, actual, expected)) {
             fail(ctx, SEM_ERROR_NOMATCH, node, "Incompatible return type.");
         }
@@ -471,14 +471,14 @@ static Flow checkStatement(Context *ctx, Node *node)
             fail(ctx, SEM_ERROR_REDEFINED, node, "Duplicate definition in the same block.");
             break;
         }
-        DataType expected = node->data.declaration.declaredType;
-        if (expected != TYPE_UNKNOWN && !isUserType(expected)) {
+        DeclType expected = node->data.declaration.declaredType;
+        if (expected != TYPE_UNSPECIFIED && !isUserType(expected)) {
             fail(ctx, SEM_ERROR_UNDEFINED, node, "Invalid declared type.");
             break;
         }
         Node *value = node->data.declaration.value;
-        DataType actual = checkExpression(ctx, value, true, false);
-        if (expected == TYPE_UNKNOWN) {
+        DeclType actual = checkExpression(ctx, value, true, false);
+        if (expected == TYPE_UNSPECIFIED) {
             expected = actual;
         }
         if (!compatible(value, actual, expected)) {
@@ -505,7 +505,7 @@ static Flow checkStatement(Context *ctx, Node *node)
             break;
         }
         Node *value = node->data.assignment.value;
-        DataType actual = checkExpression(ctx, value, true, false);
+        DeclType actual = checkExpression(ctx, value, true, false);
         if (!compatible(value, actual, symbol.type)) {
             fail(ctx, SEM_ERROR_NOMATCH, node, "Incompatible assignment type.");
         }
@@ -601,16 +601,16 @@ static void checkFunctionResult(Context *ctx, Node *function, Node *body, Flow r
     if (ctx->error.code != SUCCESS) {
         return;
     }
-    DataType expected = function->data.function.returnType;
+    DeclType expected = function->data.function.returnType;
     Node *last = body;
     if (body->type == AST_BLOCK && body->childCount > 0) {
         last = body->children[body->childCount - 1];
     }
     if (!result.returns) {
         if (last->type == AST_IF && expected != TYPE_UNIT
-            && !(expected == TYPE_UNKNOWN && result.unitTail)) {
+            && !(expected == TYPE_UNSPECIFIED && result.unitTail)) {
             fail(ctx, SEM_ERROR_NOMATCH, last, "Invalid trailing if statement in function body.");
-        } else if (expected == TYPE_UNKNOWN) {
+        } else if (expected == TYPE_UNSPECIFIED) {
             expected = result.type;
         } else if (expected != TYPE_UNIT && !compatible(last, result.type, expected)) {
             fail(ctx, SEM_ERROR_NOMATCH, last, "Incompatible function body result.");
@@ -642,7 +642,7 @@ static void checkRecursion(Context *ctx, FunctionInfo *info)
     if (end - ctx->componentCount > 1) {
         for (size_t i = ctx->componentCount; i < end; ++i) {
             item = ctx->componentStack[i];
-            if (item->node->data.function.returnType == TYPE_UNKNOWN) {
+            if (item->node->data.function.returnType == TYPE_UNSPECIFIED) {
                 fail(ctx, SEM_ERROR_NOMATCH, item->node,
                     "Recursion requires an explicit return type.");
             }
@@ -686,7 +686,7 @@ static void checkFunction(Context *ctx, FunctionInfo *info)
         if (body->type == AST_BLOCK) {
             result = checkBlock(ctx, body, false);
         } else {
-            DataType type = checkExpression(ctx, body, true, false);
+            DeclType type = checkExpression(ctx, body, true, false);
             result = (Flow) { type, false, type == TYPE_UNIT };
         }
         checkFunctionResult(ctx, function, body, result);
@@ -716,11 +716,11 @@ static void firstPass(Context *ctx, Node *program)
             break;
         }
         ctx->functionInfo[i].node = fn;
-        fn->valueType = TYPE_UNKNOWN;
+        fn->valueType = TYPE_UNSPECIFIED;
         fn->convertToDouble = false;
         fn->symbolId = i + 1;
-        DataType type = fn->data.function.returnType;
-        if (type != TYPE_UNKNOWN && !isUserType(type)) {
+        DeclType type = fn->data.function.returnType;
+        if (type != TYPE_UNSPECIFIED && !isUserType(type)) {
             fail(ctx, SEM_ERROR_UNDEFINED, fn, "Invalid return type.");
             break;
         }
@@ -748,7 +748,7 @@ static void firstPass(Context *ctx, Node *program)
                 fail(ctx, SEM_ERROR_REDEFINED, fn, "Multiple entry functions.");
             } else if (fn->childCount != 1) {
                 fail(ctx, SEM_ERROR_INVALID, fn, "Entry function must not have parameters.");
-            } else if (type != TYPE_UNKNOWN && type != TYPE_UNIT) {
+            } else if (type != TYPE_UNSPECIFIED && type != TYPE_UNIT) {
                 fail(ctx, SEM_ERROR_NOMATCH, fn, "Entry function must return Unit.");
             }
         }
