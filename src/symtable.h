@@ -15,10 +15,10 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include "../ast.h"
-#include "../error.h"
+#include "ast.h"
+#include "error.h"
 
-//typedef struct Node Node;
+// typedef struct Node Node;
 typedef struct SymTable SymTable;
 
 typedef enum { SYMBOL_VARIABLE, SYMBOL_FUNCTION } SymbolKind;
