@@ -14,8 +14,8 @@
 #include "syn/init.h"
 #include "sem/init.h"
 //#include "sem/semantics.h" //will dissapear soon
-#include "sem/symtable.h"
-#include "gen/init.h"
+//#include "sem/symtable.h"
+//#include "gen/init.h"
 #include "core/error.h"
 #include "core/token.h"
 
@@ -39,16 +39,16 @@ int main(void)
 
     //do semantics
     if (parser.error.code == SUCCESS) {
-        SemanticError semErr = {SUCCESS, 0, ""};
-        ErrorCode semCode = semanticsRun(program, &semErr);
-        
+        //SemanticError semErr = {SUCCESS, 0, ""};
+        //ErrorCode semCode = semanticsRun(program, &semErr);
+        /*
         if (semCode != SUCCESS) {
             handleError( &parser.error, semCode, semErr.message ? semErr.message : "Semantic or code generation error", semErr.line);
-        }
+        }*/
     }
 
     if (parser.error.code == SUCCESS) {
-        codeGen(*program);
+        //codeGen(*program);
     }
 
     //report errors to stderr

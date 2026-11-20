@@ -1,6 +1,11 @@
 CC = clang
 CFLAGS = -std=c99 -Wall -Wextra -Wpedantic -g
-SOURCE = src/main.c
+SOURCE := src/main.c \
+	src/lex/lex.c \
+	src/syn/syn.c \
+	src/ast/ast.c \
+
+
 BUILD = build/ifj26
 
 .PHONY: all clean test
