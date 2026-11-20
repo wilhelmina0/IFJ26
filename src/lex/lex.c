@@ -43,7 +43,7 @@ typedef enum {
     INT,             /**< Reading an integer literal */
     DOUBLE,          /**< Reading the fractional part of a double literal */
     DOUBLE_EXP,      /**< Reading the exponent part of a double literal */
-    
+
     STRING,          /**< Reading a standard string literal */
     STRING_ESC,      /**< Reading an escape sequence inside a string */
     BLOCK_STRING,    /**< Reading a multiline block string literal */
@@ -68,7 +68,7 @@ typedef struct {
 
 /**
 * @brief Adds a char to the dynamic buffer and allocates more memory if it's needed.
-* 
+*
 * @param buffer Pointer to the initialized struct StringBuffer
 * @param c The char to add (obtained using getchar())
 * @param err
@@ -76,9 +76,9 @@ typedef struct {
 * @return 0 on error, 1 on success
 *
 * @warning You MUST check the return value of this function! If it returns 0, a fatal INTERNAL_ERROR has occurred and the caller must exit immediately.
-* 
+*
 * @attention The err pointer must already be allocated before calling this function.
-* 
+*
 * @note If the buffer text was NULL, it initially allocates 64 bytes.
 */
 static int appendChar(StringBuffer *buffer, int c, Error *err) {
@@ -113,7 +113,7 @@ static int appendChar(StringBuffer *buffer, int c, Error *err) {
 * @param text Pointer to the loaded string
 * @param len Length of the string
 * @param err Pointer to the shared error structure
-* 
+*
 * @return Token type
 */
 static TokenType findKeyword(const char *text, const int len, Error *err) {
@@ -183,7 +183,7 @@ Token nextToken(Error *err) {
         state = START;
     }
 
-    
+
     while (1) {
         c = getchar();
         
@@ -220,7 +220,7 @@ Token nextToken(Error *err) {
                         int nextC2 = getchar();
                         int nextC3 = getchar();
                         int nextC4 = getchar();
-                        
+
                         if (nextC1 == 'm' && nextC2 == 'a' && nextC3 == 'i' && nextC4 == 'n') {
                             token.type = TOKEN_ANNOTATION_MAIN;
                             return token;
@@ -231,7 +231,7 @@ Token nextToken(Error *err) {
                     }
 
                     //operators
-                    //single character operators can be found instantly; for the double character ones we can just look one char ahead 
+                    //single character operators can be found instantly; for the double character ones we can just look one char ahead
                     case '+': token.type = TOKEN_PLUS; return token;
                     case '-': token.type = TOKEN_MINUS; return token;
                     case '*': token.type = TOKEN_MUL; return token;
@@ -301,15 +301,15 @@ Token nextToken(Error *err) {
 
                     case '(': {
                         parenDepth++;
-                        token.type = TOKEN_LPAREN; 
+                        token.type = TOKEN_LPAREN;
                         return token;
                     }
                     case ')': {
                         if (parenDepth > 0) {
                             parenDepth--;
                         }
-                        
-                        token.type = TOKEN_RPAREN; 
+
+                        token.type = TOKEN_RPAREN;
                         return token;
                     }
                     case '.': {
@@ -346,14 +346,14 @@ Token nextToken(Error *err) {
                             continue;
                         }
                     }
-                    
+
                     //keywords, identifiers, all that
                     default:
                         if (isalpha(c) || c == '_') { //alpha chars go into the buffer
                             if (!appendChar(&buffer, c, err)) return token;
                             state = IDENTIFIER;
                             continue;
-                        } 
+                        }
                         else if (isdigit(c)) { //digits go into the buffer too
                             if (!appendChar(&buffer, c, err)) return token;
                             state = INT;
@@ -380,14 +380,14 @@ Token nextToken(Error *err) {
                     lineCounter++;
                     token.lineNumber = lineCounter;
                     spaceCounter = 0;
-                    continue; 
+                    continue;
                 }
                 else if (c == EOF) { //dont forget to handle indentation on EOF
                     if (stackTop > 0) {
                         owedDedents = stackTop;
                         stackTop = 0;
                         ungetc(c, stdin); //ungetc the EOF so it gets handled properly in START state
-                        
+
                         owedDedents--;
                         token.type = TOKEN_DEDENT;
                         return token;
@@ -404,7 +404,7 @@ Token nextToken(Error *err) {
                             if (c == '\n') {
                                 lineCounter++;
                                 token.lineNumber = lineCounter; //so potential errors show on correct lines
-                            } else if (c == EOF) { 
+                            } else if (c == EOF) {
                                 ungetc(c, stdin); //ungetc the EOF so it gets handled properly in START state
                             }
                             spaceCounter = 0; //reset this before new line !!!
@@ -482,7 +482,7 @@ Token nextToken(Error *err) {
                         ungetc(c, stdin);
                         
                         token.type = findKeyword(buffer.text, buffer.length, err);
-                        
+
                         if (err->code != SUCCESS) { //check if we passed findKeyword
                             free(buffer.text);
                             return token;
@@ -491,7 +491,7 @@ Token nextToken(Error *err) {
                         if(token.type == TOKEN_ID) {
                             token.val.stringValue = strdup(buffer.text);
                         }
-                        
+
                         free(buffer.text);
                         return token;
                 }
@@ -573,9 +573,9 @@ Token nextToken(Error *err) {
                 }
                 else {
                     if (!appendChar(&buffer, c, err)) return token;
-                    continue; 
+                    continue;
                 }
-            case INT: 
+            case INT:
                 if (isdigit(c)) { //check if we are not reading a "Leading-0 INT"; if not then add the digit
                     if (buffer.length == 1 && buffer.text[0] == '0') {
                         free(buffer.text);

@@ -5,14 +5,14 @@
  * Defines input and internal compiler errors used across compiler modules.
  *
  * @authors
- * - Bára Wilhelmová(xwilheb00)
+ * - Bára Wilhelmová (xwilheb00)
  *
- * @date 2026
  */
 
 #ifndef ERROR_H
 #define ERROR_H
 #include <stdio.h>
+#include <stdlib.h>
 
 typedef enum {
     SUCCESS,
@@ -33,16 +33,23 @@ typedef struct {
     int line;
 } Error;
 
-// inline so there is no need for error.c
-static inline void handleError(Error *err, ErrorCode code, const char *message, int line) {
-    err->code = code;
-    err->message = message;
-    err->line = line;
-}
-
-// for main
 static inline void printError(Error *err) {
     fprintf(stderr, "Error %d (line: %d): %s\n",(int)err->code, err->line, err->message);
+}
+
+// inline so there is no need for error.c
+static inline void handleError(Error *err, ErrorCode code, const char *message, int line) {
+    Error error;
+    error.code = code;
+    error.message = message;
+    error.line = line;
+
+    if (code == INTERNAL_ERROR) {
+        printError(&error);
+        exit((int)code);
+    }
+
+    *err = error;
 }
 
 #endif //ERROR_H
