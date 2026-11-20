@@ -17,7 +17,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "../ast/ast.h"
+#include "../ast.h"
 
 char *codeGen(Node top);
 
