@@ -51,7 +51,10 @@ typedef enum {
     TYPE_INT,
     TYPE_DOUBLE,
     TYPE_STRING,
-    TYPE_UNIT
+    TYPE_UNIT,
+    TYPE_BOOL,
+    TYPE_ANY,
+    TYPE_INVALID
 } DeclType;
 
 struct Symbol;
