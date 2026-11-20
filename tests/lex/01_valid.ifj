@@ -1,0 +1,22 @@
+import ifj26.*
+
+// komentar na zacatku radku
+def factorial(n: Int): Int =
+    var result: Int = 1
+    var i = n
+    while i > 1 do
+        result = result * i
+        i = i - 1
+    return result
+
+@main def run(): Unit =
+    val a: Int = 10 + 20 - 3 * 4 / 2
+    val b: Double = 3.14
+    val s: String = "ahoj"
+    if a == 24 then
+        if a != 0 then
+            if a <= 30 then
+                if a >= 10 then
+                    print(s); print(b)
+    else
+        ()

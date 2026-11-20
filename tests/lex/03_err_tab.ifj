@@ -1,0 +1,3 @@
+import ifj26.*
+@main def f(): Unit =
+	val x = 1
