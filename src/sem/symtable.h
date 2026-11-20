@@ -13,10 +13,10 @@
 #ifndef SYMTABLE_H
 #define SYMTABLE_H
 
-#include "../core/error.h"
-#include "../ast/ast.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include "../ast/ast.h"
+#include "../error.h"
 
 //typedef struct Node Node;
 typedef struct SymTable SymTable;

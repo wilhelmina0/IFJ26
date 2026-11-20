@@ -1,5 +1,5 @@
 /**
-* @file init.h
+* @file syn.h
  *
  * @brief Structure of parser
  *
@@ -11,15 +11,15 @@
 #ifndef SYN_INIT_H
 #define SYN_INIT_H
 
-#include "../lex/init.h"
-#include "../core/error.h" // error handling
-#include "../ast/ast.h"    // AST structure
+#include "../ast.h"
+#include "../error.h"
+#include "../lex/lex.h"
 
 
 #include <stdbool.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* ======================== PARSER ========================== */
 typedef struct {
