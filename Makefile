@@ -4,6 +4,8 @@ SOURCE := src/main.c \
 	src/lex.c \
 	src/syn.c \
 	src/ast.c \
+	src/sem.c \
+	src/gen.c \
 
 
 BUILD = build/ifj26
