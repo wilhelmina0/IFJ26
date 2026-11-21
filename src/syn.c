@@ -11,7 +11,7 @@
  */
 
 
-#include "init.h"
+#include "syn.h"
 
 /* ------------------------ STACK OPERATIONS --------------------- */
 // stack initialization
