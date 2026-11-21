@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
-#include "init.h"
+#include "lex.h"
 
 //counters
 static int lineCounter = 1;
