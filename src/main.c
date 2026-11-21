@@ -10,14 +10,14 @@
  * @date 2026
  */
 
-#include "lex/init.h"
-#include "syn/init.h"
-#include "sem/init.h"
+#include "lex.h"
+#include "syn.h"
+//#include "sem/init.h"
 //#include "sem/semantics.h" //will dissapear soon
 //#include "sem/symtable.h"
 //#include "gen/init.h"
-#include "core/error.h"
-#include "core/token.h"
+#include "error.h"
+#include "token.h"
 
 int main(void)
 {
