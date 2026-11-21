@@ -9,7 +9,7 @@
  *
  */
 
-#include "ast/ast.h"
+#include "ast.h"
 
 /**
  * @brief Creates AST node of desired type.
