@@ -85,4 +85,16 @@ typedef struct TOKEN
     int lineNumber;
 } Token;
 
+/**
+ * @brief Obtains the next token from stdin using a finite state machine
+ *
+ * Uses a buffer to hold context and a line for emiting dedent tokens.
+ *
+ * @return The struct Token obtaining the token type and in some cases it's value in a union
+ *
+ * @warning The caller must check error code after every call!!! If there is an error the token can and will contain
+ * garbage values!
+ */
+Token nextToken(Error *err);
+
 #endif //TOKEN_H
