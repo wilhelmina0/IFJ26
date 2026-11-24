@@ -6,25 +6,25 @@
  * The table owns copies of names and borrows pointers to AST nodes.
  *
  * @authors
- * - Radim Winter (xwinter01)
+ * - Radim Winter
  *
  */
 
 #ifndef SYMTABLE_H
 #define SYMTABLE_H
 
+#include "ast.h"
+#include "error.h"
 #include <stdbool.h>
 #include <stddef.h>
-#include "../ast.h"
-#include "../error.h"
 
-//typedef struct Node Node;
+typedef struct Node Node;
 typedef struct SymTable SymTable;
 
 typedef enum { SYMBOL_VARIABLE, SYMBOL_FUNCTION } SymbolKind;
 
 /** A symbol record copied into and out of the table. */
-typedef struct {
+typedef struct Symbol {
     SymbolKind kind;
     DeclType type;
     bool mutable;

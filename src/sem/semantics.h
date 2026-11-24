@@ -1,50 +1,41 @@
 /**
  * @file semantics.h
- * @brief Semantic analysis
+ * @brief Semantic analysis interface
  *
- * Checks the AST in two passes and stores semantic information
+ * Checks the AST and stores types, symbol identifiers and conversions
  * needed by the code generator.
  *
  * @authors
- * - Radim Winter (xwinter01)
+ * - Radim Winter
  *
  */
 
 #ifndef SEMANTICS_H
 #define SEMANTICS_H
 
-#include "ast.h"
 #include "error.h"
-#include "symtable.h"
 
+typedef struct Node Node;
+
+/** Details of the first error found during semantic analysis. */
 typedef struct {
     ErrorCode code;
     int line;
-    const char *message; // Static message, not owned by this structure.
+    const char *message; /**< Static message; the caller must not free it. */
 } SemanticError;
 
 /**
- * @brief Performs semantic analysis of the complete AST.
+ * @brief Checks function signatures, then checks their bodies.
  *
- * Registers function signatures, then checks function bodies.
- * Stores types, symbol identifiers and conversions in the AST.
- * The caller keeps ownership of the AST; temporary tables are released.
+ * Adds types, symbol identifiers and Int-to-Double conversion flags to the AST.
+ * Temporary symbol tables are freed before returning. The caller owns the AST.
+ * Only use the annotated AST for generation after SUCCESS; on failure some nodes
+ * may already be annotated. This function does not call the generator or print.
  *
- * @param program Root AST_PROGRAM node
- * @param err Optional output error; may be NULL
- * @return SUCCESS on success, otherwise the first error code
- */
-ErrorCode semanticsCheck(Node *program, SemanticError *err);
-
-/**
- * @brief Checks the AST and passes it to the code generator.
- *
- * Calls generateCode only after successful semantic analysis.
- * The caller keeps ownership of the AST even if an error occurs.
- *
- * @param program Root AST_PROGRAM node
- * @param err Optional output error; may be NULL
- * @return SUCCESS, a semantic error code, or INTERNAL_ERROR if generation fails
+ * @param program Complete AST_PROGRAM root with the layout in ast.h.
+ * @param err Optional error output; may be NULL.
+ * @return SUCCESS, the first semantic/syntax error, or INTERNAL_ERROR.
  */
 ErrorCode semanticsRun(Node *program, SemanticError *err);
+
 #endif // SEMANTICS_H

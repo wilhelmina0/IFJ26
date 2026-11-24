@@ -4,9 +4,10 @@
  *
  * Inserts and finds symbols in a height-balanced binary search tree.
  * Updates heights and restores balance while returning from recursive insertion.
+ * Based on IAL lecture 05_2026_Vyhledavani_II.pdf, slides 37-52.
  *
  * @authors
- * - Radim Winter (xwinter01)
+ * - Radim Winter
  *
  */
 
@@ -31,8 +32,7 @@ struct SymTable {
 static int height(const TreeNode *node) { return node ? node->height : 0; }
 
 /** @brief Recomputes a node's height from the heights of its children. */
-static void updateHeight(TreeNode *node)
-{
+static void updateHeight(TreeNode *node) {
     int leftHeight = height(node->left);
     int rightHeight = height(node->right);
     node->height = 1 + (leftHeight > rightHeight ? leftHeight : rightHeight);
@@ -42,8 +42,7 @@ static void updateHeight(TreeNode *node)
 static int balance(const TreeNode *node) { return height(node->right) - height(node->left); }
 
 /** @brief Rotates left and returns the new root of this subtree. */
-static TreeNode *rotateLeft(TreeNode *root)
-{
+static TreeNode *rotateLeft(TreeNode *root) {
     TreeNode *pivot = root->right;
     root->right = pivot->left;
     pivot->left = root;
@@ -54,8 +53,7 @@ static TreeNode *rotateLeft(TreeNode *root)
 }
 
 /** @brief Rotates right and returns the new root of this subtree. */
-static TreeNode *rotateRight(TreeNode *root)
-{
+static TreeNode *rotateRight(TreeNode *root) {
     TreeNode *pivot = root->left;
     root->left = pivot->right;
     pivot->right = root;
@@ -65,8 +63,7 @@ static TreeNode *rotateRight(TreeNode *root)
 }
 
 /** @brief Restores AVL balance after insertion, using a single or double rotation. */
-static TreeNode *rebalance(TreeNode *root)
-{
+static TreeNode *rebalance(TreeNode *root) {
     updateHeight(root);
     int difference = balance(root);
 
@@ -86,8 +83,7 @@ static TreeNode *rebalance(TreeNode *root)
 }
 
 /** @brief Allocates a leaf with its own copy of the name. */
-static TreeNode *createNode(const char *name, Symbol value)
-{
+static TreeNode *createTreeNode(const char *name, Symbol value) {
     size_t length = strlen(name);
     if (length == SIZE_MAX) {
         return NULL;
@@ -110,10 +106,9 @@ static TreeNode *createNode(const char *name, Symbol value)
 }
 
 /** @brief Inserts recursively, then rebalances each ancestor on the way back. */
-static TreeNode *insertNode(TreeNode *root, const char *name, Symbol value, ErrorCode *code)
-{
+static TreeNode *insertNode(TreeNode *root, const char *name, Symbol value, ErrorCode *code) {
     if (!root) {
-        TreeNode *node = createNode(name, value);
+        TreeNode *node = createTreeNode(name, value);
         *code = node ? SUCCESS : INTERNAL_ERROR;
         return node;
     }
@@ -130,8 +125,7 @@ static TreeNode *insertNode(TreeNode *root, const char *name, Symbol value, Erro
 }
 
 /** @brief Frees children before their parent, leaving borrowed AST nodes alive. */
-static void destroyNodes(TreeNode *root)
-{
+static void destroyNodes(TreeNode *root) {
     if (!root) {
         return;
     }
@@ -141,8 +135,7 @@ static void destroyNodes(TreeNode *root)
     free(root);
 }
 
-SymTable *symtableCreate(void)
-{
+SymTable *symtableCreate(void) {
     SymTable *table = malloc(sizeof(*table));
     if (table) {
         table->root = NULL;
@@ -150,16 +143,14 @@ SymTable *symtableCreate(void)
     return table;
 }
 
-void symtableDestroy(SymTable *table)
-{
+void symtableDestroy(SymTable *table) {
     if (table) {
         destroyNodes(table->root);
         free(table);
     }
 }
 
-ErrorCode symtableInsert(SymTable *table, const char *name, Symbol value)
-{
+ErrorCode symtableInsert(SymTable *table, const char *name, Symbol value) {
     if (!table || !name) {
         return INTERNAL_ERROR;
     }
@@ -168,8 +159,7 @@ ErrorCode symtableInsert(SymTable *table, const char *name, Symbol value)
     return code;
 }
 
-bool symtableFind(const SymTable *table, const char *name, Symbol *out)
-{
+bool symtableFind(const SymTable *table, const char *name, Symbol *out) {
     if (!table || !name || !out) {
         return false;
     }
