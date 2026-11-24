@@ -6,25 +6,33 @@
  * The table owns copies of names and borrows pointers to AST nodes.
  *
  * @authors
- * - Radim Winter (xwinter01)
+ * - Radim Winter
  *
+ * @par AI prompt (English summary)
+ * Adapt my semantics and symbol table to the supplied project materials and
+ * colleague feedback. Use a balanced tree, use the actual AST interface,
+ * and keep simple camelCase code with English documentation.
+ * The original user wording is recorded in AI_USAGE.md.
+ *
+ * @note AI-generated reference code (ChatGPT); see AI_USAGE.md for the prompt.
+ * The assignment prohibits AI-generated search structures in the submission.
  */
 
 #ifndef SYMTABLE_H
 #define SYMTABLE_H
 
+#include "ast.h"
+#include "error.h"
 #include <stdbool.h>
 #include <stddef.h>
-#include "../ast.h"
-#include "../error.h"
 
-//typedef struct Node Node;
+typedef struct Node Node;
 typedef struct SymTable SymTable;
 
 typedef enum { SYMBOL_VARIABLE, SYMBOL_FUNCTION } SymbolKind;
 
 /** A symbol record copied into and out of the table. */
-typedef struct {
+typedef struct Symbol {
     SymbolKind kind;
     DeclType type;
     bool mutable;

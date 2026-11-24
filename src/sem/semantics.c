@@ -6,12 +6,19 @@
  * needed by the code generator.
  *
  * @authors
- * - Radim Winter (xwinter01)
+ * - Radim Winter
  *
+ * @par AI prompt (English summary)
+ * Adapt my semantics and symbol table to the supplied project materials and
+ * colleague feedback. Use a balanced tree, use the actual AST interface,
+ * and keep simple camelCase code with English documentation.
+ * The original user wording is recorded in AI_USAGE.md.
+ *
+ * @note AI-assisted reference code (ChatGPT); see AI_USAGE.md for the prompt.
  */
 
-#include "../ast/ast.h"
-#include "init.h"
+#include "semantics.h"
+#include "ast.h"
 #include "symtable.h"
 #include <stdlib.h>
 #include <string.h>
@@ -47,7 +54,7 @@ typedef struct {
 
 typedef struct {
     DeclType type;
-    bool returns; // Whether the final statement ends in return on all branches.
+    bool returns;  // Whether the final statement ends in return on all branches.
     bool unitTail; // Whether all branches of a trailing if produce Unit.
 } Flow;
 
@@ -59,16 +66,16 @@ typedef struct {
 } Builtin;
 
 static const Builtin builtins[] = {
-    { "print", TYPE_UNIT, 1, { TYPE_ANY } },
-    { "readLine", TYPE_STRING, 0, { TYPE_UNSPECIFIED } },
-    { "readInt", TYPE_INT, 0, { TYPE_UNSPECIFIED } },
-    { "readDouble", TYPE_DOUBLE, 0, { TYPE_UNSPECIFIED } },
-    { "toStr", TYPE_STRING, 1, { TYPE_ANY } },
-    { "toInt", TYPE_INT, 1, { TYPE_DOUBLE } },
-    { "strLength", TYPE_INT, 1, { TYPE_STRING } },
-    { "subStr", TYPE_STRING, 3, { TYPE_STRING, TYPE_INT, TYPE_INT } },
-    { "ord", TYPE_INT, 2, { TYPE_STRING, TYPE_INT } },
-    { "chr", TYPE_STRING, 1, { TYPE_INT } },
+    {"print", TYPE_UNIT, 1, {TYPE_ANY}},
+    {"readLine", TYPE_STRING, 0, {TYPE_UNSPECIFIED}},
+    {"readInt", TYPE_INT, 0, {TYPE_UNSPECIFIED}},
+    {"readDouble", TYPE_DOUBLE, 0, {TYPE_UNSPECIFIED}},
+    {"toStr", TYPE_STRING, 1, {TYPE_ANY}},
+    {"toInt", TYPE_INT, 1, {TYPE_DOUBLE}},
+    {"strLength", TYPE_INT, 1, {TYPE_STRING}},
+    {"substr", TYPE_STRING, 3, {TYPE_STRING, TYPE_INT, TYPE_INT}},
+    {"ord", TYPE_INT, 2, {TYPE_STRING, TYPE_INT}},
+    {"chr", TYPE_STRING, 1, {TYPE_INT}},
 };
 
 static DeclType checkExpression(Context *ctx, Node *node, bool allowCall, bool inCondition);
@@ -77,8 +84,7 @@ static Flow checkBlock(Context *ctx, Node *node, bool newScope);
 static void checkFunction(Context *ctx, FunctionInfo *info);
 
 /** @brief Stores the first semantic error and its source line. */
-static void fail(Context *ctx, ErrorCode code, const Node *node, const char *message)
-{
+static void fail(Context *ctx, ErrorCode code, const Node *node, const char *message) {
     if (ctx->error.code == SUCCESS) {
         ctx->error.code = code;
         ctx->error.line = node ? node->line : 0;
@@ -87,8 +93,7 @@ static void fail(Context *ctx, ErrorCode code, const Node *node, const char *mes
 }
 
 /** @brief Checks whether a type is available in the basic language. */
-static bool isUserType(DeclType type)
-{
+static bool isUserType(DeclType type) {
     return type == TYPE_INT || type == TYPE_DOUBLE || type == TYPE_STRING || type == TYPE_UNIT;
 }
 
@@ -100,8 +105,7 @@ static bool isNumeric(DeclType type) { return type == TYPE_INT || type == TYPE_D
  *
  * Marks an Int to Double conversion in the AST when needed.
  */
-static bool compatible(Node *value, DeclType actual, DeclType expected)
-{
+static bool compatible(Node *value, DeclType actual, DeclType expected) {
     if (!value || actual == TYPE_UNSPECIFIED) {
         return false;
     }
@@ -120,8 +124,7 @@ static bool compatible(Node *value, DeclType actual, DeclType expected)
  *
  * Links the new scope to its parent. The caller owns and activates the scope.
  */
-static bool initScope(Context *ctx, Scope *scope, Node *node)
-{
+static bool initScope(Context *ctx, Scope *scope, Node *node) {
     scope->table = symtableCreate();
     if (!scope->table) {
         fail(ctx, INTERNAL_ERROR, node, "Cannot create symbol table.");
@@ -136,8 +139,7 @@ static bool initScope(Context *ctx, Scope *scope, Node *node)
  *
  * Searches the current scope first, then continues through parent scopes.
  */
-static bool findVariable(Context *ctx, const char *name, Symbol *symbol)
-{
+static bool findVariable(Context *ctx, const char *name, Symbol *symbol) {
     for (Scope *scope = ctx->scope; scope; scope = scope->parent) {
         if (symtableFind(scope->table, name, symbol)) {
             return true;
@@ -152,17 +154,28 @@ static bool findVariable(Context *ctx, const char *name, Symbol *symbol)
  * Stores its type, mutability and identifier, and writes the identifier to the AST.
  * The symbol table rejects duplicate names in the same scope.
  */
-static void defineVariable(Context *ctx, Node *node, const char *name, DeclType type, bool mutable)
-{
+static void defineVariable(Context *ctx, Node *node, const char *name, DeclType type,
+                           bool mutable) {
     if (!node || !name || !ctx->scope || ctx->nextId == 0) {
         fail(ctx, INTERNAL_ERROR, node, "Invalid declaration in AST.");
         return;
     }
-    Symbol symbol = { SYMBOL_VARIABLE, type, mutable, ctx->nextId, node };
+    Symbol symbol = {SYMBOL_VARIABLE, type, mutable, ctx->nextId, node};
+    Symbol *owned = malloc(sizeof(*owned));
+    if (!owned) {
+        fail(ctx, INTERNAL_ERROR, node, "Cannot allocate symbol record.");
+        return;
+    }
+    *owned = symbol;
     ErrorCode code = symtableInsert(ctx->scope->table, name, symbol);
     if (code != SUCCESS) {
+        free(owned);
         fail(ctx, code, node, "Cannot insert name into current scope.");
     } else {
+        Symbol **slot = node->type == AST_PARAM ? &node->data.parameter.symbol
+                                                : &node->data.varDeclaration.symbol;
+        free(*slot);
+        *slot = owned;
         node->symbolId = symbol.id;
         ++ctx->nextId;
     }
@@ -173,18 +186,18 @@ static void defineVariable(Context *ctx, Node *node, const char *name, DeclType 
  *
  * Accepts identifiers, literals and signed numeric literals.
  */
-static bool isTerm(const Node *node)
-{
+static bool isTerm(const Node *node) {
     if (!node) {
         return false;
     }
-    if (node->type == AST_IDENTIFIER || node->type == AST_INT || node->type == AST_DOUBLE
-        || node->type == AST_STRING || node->type == AST_UNIT) {
+    if (node->type == AST_IDENTIFIER || node->type == AST_INT || node->type == AST_DOUBLE ||
+        node->type == AST_STRING || node->type == AST_UNIT) {
         return true;
     }
-    return node->type == AST_UNARY && node->childCount == 1 && node->children && node->children[0]
-        && (node->data.unary.op == TOKEN_MINUS || node->data.unary.op == TOKEN_PLUS)
-        && (node->children[0]->type == AST_INT || node->children[0]->type == AST_DOUBLE);
+    return node->type == AST_UNARY && node->data.unary.operand &&
+           (node->data.unary.op == TOKEN_MINUS || node->data.unary.op == TOKEN_PLUS) &&
+           (node->data.unary.operand->type == AST_INT ||
+            node->data.unary.operand->type == AST_DOUBLE);
 }
 
 /**
@@ -193,8 +206,7 @@ static bool isTerm(const Node *node)
  * Resolves the function and checks the argument count and types.
  * Analyzes the called function when its return type is not known yet.
  */
-static DeclType checkCall(Context *ctx, Node *node)
-{
+static DeclType checkCall(Context *ctx, Node *node) {
     const char *name = node->data.call.id;
     if (!name) {
         fail(ctx, INTERNAL_ERROR, node, "Function call has no name.");
@@ -210,6 +222,7 @@ static DeclType checkCall(Context *ctx, Node *node)
     const Builtin *builtin = NULL;
     if (symtableFind(ctx->functions, name, &symbol)) {
         node->symbolId = symbol.id;
+        node->data.call.symbol = symbol.declaration->data.function.symbol;
         function = symbol.declaration;
         info = &ctx->functionInfo[symbol.id - 1];
     } else {
@@ -224,23 +237,28 @@ static DeclType checkCall(Context *ctx, Node *node)
         fail(ctx, SEM_ERROR_UNDEFINED, node, "Undefined function.");
         return TYPE_UNSPECIFIED;
     }
-    size_t count = function ? function->childCount - 1 : builtin->count;
-    if (node->childCount != count) {
+    size_t count = function ? function->data.function.params.size : builtin->count;
+    if (node->data.call.args.size != count) {
         fail(ctx, SEM_ERROR_INVALID, node, "Invalid number of arguments.");
         return TYPE_UNSPECIFIED;
     }
+    ListNode *argument = node->data.call.args.first;
+    ListNode *parameter = function ? function->data.function.params.first : NULL;
     for (size_t i = 0; i < count && ctx->error.code == SUCCESS; ++i) {
-        Node *arg = node->children[i];
+        Node *arg = *(Node **)argument->data;
         if (!isTerm(arg)) {
             fail(ctx, SYN_ERROR, arg, "Arguments must be terms without the FUNEXP extension.");
             return TYPE_UNSPECIFIED;
         }
         DeclType actual = checkExpression(ctx, arg, false, false);
-        DeclType expected
-            = function ? function->children[i]->data.parameter.declaredType : builtin->params[i];
+        DeclType expected =
+            function ? (*(Node **)parameter->data)->data.parameter.declType : builtin->params[i];
         if (!compatible(arg, actual, expected)) {
             fail(ctx, SEM_ERROR_INVALID, arg, "Invalid argument type.");
         }
+        argument = argument->next;
+        if (parameter)
+            parameter = parameter->next;
     }
     if (ctx->error.code != SUCCESS) {
         return TYPE_UNSPECIFIED;
@@ -273,8 +291,7 @@ static DeclType checkCall(Context *ctx, Node *node)
  *
  * Marks numeric conversions when needed. Actual values are evaluated at runtime.
  */
-static DeclType checkBinary(Context *ctx, Node *node)
-{
+static DeclType checkBinary(Context *ctx, Node *node) {
     Node *left = node->data.binary.left;
     Node *right = node->data.binary.right;
     DeclType leftType = checkExpression(ctx, left, false, false);
@@ -335,12 +352,11 @@ static DeclType checkBinary(Context *ctx, Node *node)
  *
  * Resolves variable identifiers and checks whether calls are allowed here.
  */
-static DeclType checkExpression(Context *ctx, Node *node, bool allowCall, bool inCondition)
-{
+static DeclType checkExpression(Context *ctx, Node *node, bool allowCall, bool inCondition) {
     if (ctx->error.code != SUCCESS) {
         return TYPE_UNSPECIFIED;
     }
-    if (!node || (node->childCount > 0 && !node->children)) {
+    if (!node) {
         fail(ctx, INTERNAL_ERROR, node, "Invalid expression children in AST.");
         return TYPE_UNSPECIFIED;
     }
@@ -382,13 +398,13 @@ static DeclType checkExpression(Context *ctx, Node *node, bool allowCall, bool i
         type = checkBinary(ctx, node);
         break;
     case AST_UNARY:
-        if (node->childCount != 1) {
+        if (!node->data.unary.operand) {
             fail(ctx, INTERNAL_ERROR, node, "Invalid unary expression in AST.");
             break;
         }
-        type = checkExpression(ctx, node->children[0], false, false);
-        if ((node->data.unary.op != TOKEN_MINUS && node->data.unary.op != TOKEN_PLUS)
-            || !isNumeric(type)) {
+        type = checkExpression(ctx, node->data.unary.operand, false, false);
+        if ((node->data.unary.op != TOKEN_MINUS && node->data.unary.op != TOKEN_PLUS) ||
+            !isNumeric(type)) {
             fail(ctx, SEM_ERROR_NOMATCH, node, "Unary operator requires a numeric operand.");
         }
         break;
@@ -404,8 +420,7 @@ static DeclType checkExpression(Context *ctx, Node *node, bool allowCall, bool i
 }
 
 /** @brief Checks that an if or while condition has type Boolean. */
-static void checkCondition(Context *ctx, Node *node)
-{
+static void checkCondition(Context *ctx, Node *node) {
     if (checkExpression(ctx, node, false, true) != TYPE_BOOL) {
         fail(ctx, SEM_ERROR_NOMATCH, node, "Condition must have type Boolean.");
     }
@@ -416,24 +431,19 @@ static void checkCondition(Context *ctx, Node *node)
  *
  * Also checks return statements in unreachable code.
  */
-static Flow checkReturn(Context *ctx, Node *node)
-{
-    Flow flow = { TYPE_UNIT, true, true };
-    if (node->childCount > 1) {
-        fail(ctx, INTERNAL_ERROR, node, "Invalid return statement in AST.");
-        return flow;
-    }
+static Flow checkReturn(Context *ctx, Node *node) {
+    Flow flow = {TYPE_UNIT, true, true};
     DeclType expected = ctx->function->data.function.returnType;
     if (expected == TYPE_UNSPECIFIED) {
         fail(ctx, SEM_ERROR_NOMATCH, node, "Return requires an explicit function return type.");
         return flow;
     }
-    if (!node->childCount) {
+    if (!node->data.returnNode.value) {
         if (expected != TYPE_UNIT) {
             fail(ctx, SEM_ERROR_NOMATCH, node, "Return without a value requires Unit.");
         }
     } else {
-        Node *value = node->children[0];
+        Node *value = node->data.returnNode.value;
         DeclType actual = checkExpression(ctx, value, true, false);
         if (expected != TYPE_UNIT && !compatible(value, actual, expected)) {
             fail(ctx, SEM_ERROR_NOMATCH, node, "Incompatible return type.");
@@ -447,13 +457,12 @@ static Flow checkReturn(Context *ctx, Node *node)
  *
  * Checks a variable initializer before inserting the declaration into its scope.
  */
-static Flow checkStatement(Context *ctx, Node *node)
-{
-    Flow flow = { TYPE_UNIT, false, true };
+static Flow checkStatement(Context *ctx, Node *node) {
+    Flow flow = {TYPE_UNIT, false, true};
     if (ctx->error.code != SUCCESS) {
         return flow;
     }
-    if (!node || (node->childCount > 0 && !node->children)) {
+    if (!node) {
         fail(ctx, INTERNAL_ERROR, node, "Invalid statement children in AST.");
         return flow;
     }
@@ -461,8 +470,8 @@ static Flow checkStatement(Context *ctx, Node *node)
     node->convertToDouble = false;
     Symbol symbol;
     switch (node->type) {
-    case AST_DECL: {
-        const char *name = node->data.declaration.name;
+    case AST_VARDECL: {
+        const char *name = node->data.varDeclaration.id;
         if (!name) {
             fail(ctx, INTERNAL_ERROR, node, "Declaration has no name.");
             break;
@@ -471,12 +480,12 @@ static Flow checkStatement(Context *ctx, Node *node)
             fail(ctx, SEM_ERROR_REDEFINED, node, "Duplicate definition in the same block.");
             break;
         }
-        DeclType expected = node->data.declaration.declaredType;
+        DeclType expected = node->data.varDeclaration.declType;
         if (expected != TYPE_UNSPECIFIED && !isUserType(expected)) {
             fail(ctx, SEM_ERROR_UNDEFINED, node, "Invalid declared type.");
             break;
         }
-        Node *value = node->data.declaration.value;
+        Node *value = node->data.varDeclaration.initializer;
         DeclType actual = checkExpression(ctx, value, true, false);
         if (expected == TYPE_UNSPECIFIED) {
             expected = actual;
@@ -485,7 +494,7 @@ static Flow checkStatement(Context *ctx, Node *node)
             fail(ctx, SEM_ERROR_NOMATCH, node, "Incompatible initializer type.");
         }
         if (ctx->error.code == SUCCESS) {
-            defineVariable(ctx, node, name, expected, node->data.declaration.mutable);
+            defineVariable(ctx, node, name, expected, node->data.varDeclaration.mutable);
         }
         // For a declaration, valueType is the variable type, not the statement result.
         node->valueType = expected;
@@ -516,32 +525,33 @@ static Flow checkStatement(Context *ctx, Node *node)
         flow = checkReturn(ctx, node);
         break;
     case AST_IF: {
-        if (node->childCount != 3) {
+        if (!node->data.ifNode.cond || !node->data.ifNode.branchThen ||
+            !node->data.ifNode.branchElse) {
             fail(ctx, SYN_ERROR, node,
-                "An if statement requires both branches in the basic language.");
+                 "An if statement requires both branches in the basic language.");
             break;
         }
-        checkCondition(ctx, node->children[0]);
+        checkCondition(ctx, node->data.ifNode.cond);
         if (ctx->error.code != SUCCESS) {
             break;
         }
-        Flow yes = checkBlock(ctx, node->children[1], true);
-        Flow no = checkBlock(ctx, node->children[2], true);
+        Flow yes = checkBlock(ctx, node->data.ifNode.branchThen, true);
+        Flow no = checkBlock(ctx, node->data.ifNode.branchElse, true);
         flow.returns = yes.returns && no.returns;
-        flow.unitTail
-            = yes.unitTail && no.unitTail && yes.type == TYPE_UNIT && no.type == TYPE_UNIT;
+        flow.unitTail =
+            yes.unitTail && no.unitTail && yes.type == TYPE_UNIT && no.type == TYPE_UNIT;
         break;
     }
     case AST_WHILE:
-        if (node->childCount != 2) {
+        if (!node->data.whileNode.cond || !node->data.whileNode.body) {
             fail(ctx, INTERNAL_ERROR, node, "Invalid while statement in AST.");
             break;
         }
-        checkCondition(ctx, node->children[0]);
+        checkCondition(ctx, node->data.whileNode.cond);
         if (ctx->error.code != SUCCESS) {
             break;
         }
-        (void)checkBlock(ctx, node->children[1], true);
+        (void)checkBlock(ctx, node->data.whileNode.body, true);
         // A loop may execute zero times even if its body returns.
         break;
     case AST_BLOCK:
@@ -562,17 +572,12 @@ static Flow checkStatement(Context *ctx, Node *node)
  * Checks unreachable statements as well. The syntactically last statement
  * determines the block result used when checking the function return type.
  */
-static Flow checkBlock(Context *ctx, Node *node, bool newScope)
-{
-    Flow flow = { TYPE_UNIT, false, true };
+static Flow checkBlock(Context *ctx, Node *node, bool newScope) {
+    Flow flow = {TYPE_UNIT, false, true};
     if (ctx->error.code != SUCCESS) {
         return flow;
     }
-    if (node && node->childCount > 0 && !node->children) {
-        fail(ctx, INTERNAL_ERROR, node, "Invalid block children in AST.");
-        return flow;
-    }
-    if (!node || node->type != AST_BLOCK || !node->childCount) {
+    if (!node || node->type != AST_BLOCK || !node->data.block.statements.size) {
         fail(ctx, SYN_ERROR, node, "Expected a nonempty block.");
         return flow;
     }
@@ -584,8 +589,9 @@ static Flow checkBlock(Context *ctx, Node *node, bool newScope)
         }
         ctx->scope = &scope;
     }
-    for (size_t i = 0; i < node->childCount && ctx->error.code == SUCCESS; ++i) {
-        flow = checkStatement(ctx, node->children[i]);
+    for (ListNode *item = node->data.block.statements.first; item && ctx->error.code == SUCCESS;
+         item = item->next) {
+        flow = checkStatement(ctx, *(Node **)item->data);
     }
     node->valueType = flow.type;
     ctx->scope = savedScope;
@@ -596,19 +602,18 @@ static Flow checkBlock(Context *ctx, Node *node, bool newScope)
 }
 
 /** @brief Checks the final result and inferred return type of a function. */
-static void checkFunctionResult(Context *ctx, Node *function, Node *body, Flow result)
-{
+static void checkFunctionResult(Context *ctx, Node *function, Node *body, Flow result) {
     if (ctx->error.code != SUCCESS) {
         return;
     }
     DeclType expected = function->data.function.returnType;
     Node *last = body;
-    if (body->type == AST_BLOCK && body->childCount > 0) {
-        last = body->children[body->childCount - 1];
+    if (body->type == AST_BLOCK && body->data.block.statements.last) {
+        last = *(Node **)body->data.block.statements.last->data;
     }
     if (!result.returns) {
-        if (last->type == AST_IF && expected != TYPE_UNIT
-            && !(expected == TYPE_UNSPECIFIED && result.unitTail)) {
+        if (last->type == AST_IF && expected != TYPE_UNIT &&
+            !(expected == TYPE_UNSPECIFIED && result.unitTail)) {
             fail(ctx, SEM_ERROR_NOMATCH, last, "Invalid trailing if statement in function body.");
         } else if (expected == TYPE_UNSPECIFIED) {
             expected = result.type;
@@ -617,6 +622,8 @@ static void checkFunctionResult(Context *ctx, Node *function, Node *body, Flow r
         }
     }
     function->valueType = expected;
+    if (function->data.function.symbol)
+        function->data.function.symbol->type = expected;
     if (ctx->error.code == SUCCESS && function->data.function.main && expected != TYPE_UNIT) {
         fail(ctx, SEM_ERROR_NOMATCH, function, "Entry function must return Unit.");
     }
@@ -628,8 +635,7 @@ static void checkFunctionResult(Context *ctx, Node *function, Node *body, Flow r
  * A cycle can include functions visited through different DFS branches.
  * The component stack keeps these functions together until their root is done.
  */
-static void checkRecursion(Context *ctx, FunctionInfo *info)
-{
+static void checkRecursion(Context *ctx, FunctionInfo *info) {
     if (info->lowLink != info->index) {
         return;
     }
@@ -644,7 +650,7 @@ static void checkRecursion(Context *ctx, FunctionInfo *info)
             item = ctx->componentStack[i];
             if (item->node->data.function.returnType == TYPE_UNSPECIFIED) {
                 fail(ctx, SEM_ERROR_NOMATCH, item->node,
-                    "Recursion requires an explicit return type.");
+                     "Recursion requires an explicit return type.");
             }
         }
     }
@@ -656,8 +662,7 @@ static void checkRecursion(Context *ctx, FunctionInfo *info)
  * Creates a separate scope for parameters and local variables.
  * Tracks call graph components to check recursive functions.
  */
-static void checkFunction(Context *ctx, FunctionInfo *info)
-{
+static void checkFunction(Context *ctx, FunctionInfo *info) {
     Node *function = info->node;
     if (ctx->error.code != SUCCESS || info->state == FUNCTION_CHECKED) {
         return;
@@ -676,18 +681,19 @@ static void checkFunction(Context *ctx, FunctionInfo *info)
     Scope locals;
     if (initScope(ctx, &locals, function)) {
         ctx->scope = &locals;
-        for (size_t i = 0; i + 1 < function->childCount && ctx->error.code == SUCCESS; ++i) {
-            Node *param = function->children[i];
-            param->valueType = param->data.parameter.declaredType;
-            defineVariable(ctx, param, param->data.parameter.name, param->valueType, false);
+        for (ListNode *item = function->data.function.params.first;
+             item && ctx->error.code == SUCCESS; item = item->next) {
+            Node *param = *(Node **)item->data;
+            param->valueType = param->data.parameter.declType;
+            defineVariable(ctx, param, param->data.parameter.id, param->valueType, false);
         }
-        Node *body = function->children[function->childCount - 1];
+        Node *body = function->data.function.body;
         Flow result;
         if (body->type == AST_BLOCK) {
             result = checkBlock(ctx, body, false);
         } else {
             DeclType type = checkExpression(ctx, body, true, false);
-            result = (Flow) { type, false, type == TYPE_UNIT };
+            result = (Flow){type, false, type == TYPE_UNIT};
         }
         checkFunctionResult(ctx, function, body, result);
         symtableDestroy(locals.table);
@@ -705,13 +711,13 @@ static void checkFunction(Context *ctx, FunctionInfo *info)
  * Checks signature types, duplicate definitions and the entry function.
  * Registering all functions first allows calls before their definitions.
  */
-static void firstPass(Context *ctx, Node *program)
-{
+static void firstPass(Context *ctx, Node *program) {
     size_t mainCount = 0;
-    for (size_t i = 0; i < program->childCount && ctx->error.code == SUCCESS; ++i) {
-        Node *fn = program->children[i];
-        if (!fn || fn->type != AST_FUNCTION || !fn->data.function.id || !fn->childCount
-            || !fn->children || !fn->children[fn->childCount - 1]) {
+    size_t i = 0;
+    for (ListNode *item = program->data.program.declarations.first;
+         item && ctx->error.code == SUCCESS; item = item->next, ++i) {
+        Node *fn = *(Node **)item->data;
+        if (!fn || fn->type != AST_FUNCTION || !fn->data.function.id || !fn->data.function.body) {
             fail(ctx, INTERNAL_ERROR, fn, "Invalid function in AST.");
             break;
         }
@@ -724,20 +730,29 @@ static void firstPass(Context *ctx, Node *program)
             fail(ctx, SEM_ERROR_UNDEFINED, fn, "Invalid return type.");
             break;
         }
-        for (size_t j = 0; j + 1 < fn->childCount && ctx->error.code == SUCCESS; ++j) {
-            Node *param = fn->children[j];
-            if (!param || param->type != AST_PARAM || !param->data.parameter.name) {
+        for (ListNode *paramItem = fn->data.function.params.first;
+             paramItem && ctx->error.code == SUCCESS; paramItem = paramItem->next) {
+            Node *param = *(Node **)paramItem->data;
+            if (!param || param->type != AST_PARAM || !param->data.parameter.id) {
                 fail(ctx, INTERNAL_ERROR, fn, "Invalid parameter in AST.");
                 break;
             }
-            if (!isUserType(param->data.parameter.declaredType)) {
+            if (!isUserType(param->data.parameter.declType)) {
                 fail(ctx, SEM_ERROR_UNDEFINED, param, "Invalid parameter type.");
             }
         }
         if (ctx->error.code != SUCCESS) {
             break;
         }
-        Symbol symbol = { SYMBOL_FUNCTION, type, false, i + 1, fn };
+        Symbol symbol = {SYMBOL_FUNCTION, type, false, i + 1, fn};
+        Symbol *owned = malloc(sizeof(*owned));
+        if (!owned) {
+            fail(ctx, INTERNAL_ERROR, fn, "Cannot allocate function symbol.");
+            break;
+        }
+        *owned = symbol;
+        free(fn->data.function.symbol);
+        fn->data.function.symbol = owned;
         ErrorCode code = symtableInsert(ctx->functions, fn->data.function.id, symbol);
         if (code != SUCCESS) {
             fail(ctx, code, fn, "Duplicate function or symbol table error.");
@@ -746,7 +761,7 @@ static void firstPass(Context *ctx, Node *program)
             ++mainCount;
             if (mainCount > 1) {
                 fail(ctx, SEM_ERROR_REDEFINED, fn, "Multiple entry functions.");
-            } else if (fn->childCount != 1) {
+            } else if (fn->data.function.params.size != 0) {
                 fail(ctx, SEM_ERROR_INVALID, fn, "Entry function must not have parameters.");
             } else if (type != TYPE_UNSPECIFIED && type != TYPE_UNIT) {
                 fail(ctx, SEM_ERROR_NOMATCH, fn, "Entry function must return Unit.");
@@ -764,21 +779,21 @@ static void firstPass(Context *ctx, Node *program)
  * Checks local declarations, expressions and return types. Function bodies
  * may be visited in dependency order when inferring return types.
  */
-static void secondPass(Context *ctx, Node *program)
-{
-    for (size_t i = 0; i < program->childCount && ctx->error.code == SUCCESS; ++i) {
+static void secondPass(Context *ctx, Node *program) {
+    for (size_t i = 0; i < program->data.program.declarations.size && ctx->error.code == SUCCESS;
+         ++i) {
         checkFunction(ctx, &ctx->functionInfo[i]);
     }
 }
 
-ErrorCode semanticsRun(Node *program, SemanticError *err)
-{
-    Context ctx = { 0 };
+ErrorCode semanticsRun(Node *program, SemanticError *err) {
+    Context ctx = {0};
     ctx.nextId = 1;
     ctx.error.message = "OK";
 
-    if (!program || program->type != AST_PROGRAM
-        || (program->childCount > 0 && !program->children)) {
+    if (!program || program->type != AST_PROGRAM ||
+        (program->data.program.declarations.size > 0 &&
+         !program->data.program.declarations.first)) {
         fail(&ctx, INTERNAL_ERROR, program, "Expected an AST_PROGRAM root.");
     }
 
@@ -790,7 +805,7 @@ ErrorCode semanticsRun(Node *program, SemanticError *err)
     }
 
     if (ctx.error.code == SUCCESS) {
-        size_t count = program->childCount;
+        size_t count = program->data.program.declarations.size;
         if (count == 0) {
             count = 1;
         }
