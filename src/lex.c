@@ -13,22 +13,23 @@
 #define _POSIX_C_SOURCE 200809L //so the strdup works if we use C99
 #include <stdio.h>
 #include <stdlib.h>
-#include <ctype.h>
 #include <string.h>
 #include "lex.h"
+
+#define MAX_INDENT_STACK 1024
 
 //counters
 static int lineCounter = 1;
 static int spaceCounter = 0;
-static int commentDepth = 0;
 static int parenDepth = 0;
 static int owedDedents = 0;
+static int currentLogicalLineIndent = 0;
 
 //flags
 static int isStartOfLine = 1;
 
 //indentation stack
-static int indentStack[100] = {0};
+static int indentStack[MAX_INDENT_STACK] = {0};
 static int stackTop = 0;
 
 /**
@@ -47,14 +48,6 @@ typedef enum {
     STRING,          /**< Reading a standard string literal */
     STRING_ESC,      /**< Reading an escape sequence inside a string */
     BLOCK_STRING,    /**< Reading a multiline block string literal */
-
-    MORE,            /**< Lookahead state for '>' or '>=' */
-    LESS,            /**< Lookahead state for '<' or '<=' */
-    SLASH,           /**< Lookahead state for division or comments */
-
-    LINE_COMMENT,    /**< Ignoring characters until the end of the line */
-    BLOCK_COMMENT,   /**< Ignoring characters until the block comment is closed */
-
 } LexerState;
 
 /**
@@ -65,6 +58,22 @@ typedef struct {
     int length;
     int capacity;
 } StringBuffer;
+
+static inline int isAsciiAlpha(int c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+static inline int isAsciiDigit(int c) {
+    return (c >= '0' && c <= '9');
+}
+
+static inline int isAsciiAlnum(int c) {
+    return isAsciiAlpha(c) || isAsciiDigit(c);
+}
+
+static inline int isHorizSpace(int c) {
+    return c == ' ' || c == '\t' || c == '\r';
+}
 
 /**
 * @brief Adds a char to the dynamic buffer and allocates more memory if it's needed.
@@ -84,14 +93,14 @@ typedef struct {
 static int appendChar(StringBuffer *buffer, int c, Error *err) {
     if (buffer->text == NULL) {
         buffer->capacity = 64;
-        buffer->text = malloc(buffer->capacity);
+        buffer->text = malloc((size_t)buffer->capacity);
         if (buffer->text == NULL) {
             handleError(err, INTERNAL_ERROR, "Memory allocation failed", lineCounter);
             return 0;
         }
     } else if (buffer->length + 1 >= buffer->capacity) {
         buffer->capacity *= 2;
-        char *newText = realloc(buffer->text, buffer->capacity);
+        char *newText = realloc(buffer->text, (size_t)buffer->capacity);
         if (newText == NULL) {
             free(buffer->text);
             buffer->text = NULL;
@@ -153,14 +162,170 @@ static TokenType findKeyword(const char *text, const int len, Error *err) {
     return TOKEN_ID;
 }
 
+/**
+ * @brief Consumes a nested block comment after "/*" has already been read.
+ *
+ * If the block comment contains a newline, verifies that no tokens follow it
+ * on the same physical line and pushes the terminating '\n' back to stdin.
+ *
+ * @return  0 if single-line block comment (acts as whitespace)
+ *          1 if multi-line block comment (acts as EOL)
+ *         -1 on lexical error (error already set in err)
+ */
+static int consumeBlockComment(Error *err) {
+    int depth = 1;
+    int hadNewLine = 0;
+    int startLine = lineCounter;
+    int c;
+
+    while (depth > 0) {
+        c = getchar();
+        if (c == EOF) {
+            handleError(err, LEX_ERROR, "Unclosed block comment", startLine);
+            return -1;
+        }
+        if (c == '\n') {
+            lineCounter++;
+            hadNewLine = 1;
+        } else if (c == '/') {
+            int nextC = getchar();
+            if (nextC == '*') {
+                depth++;
+            } else if (nextC == EOF) {
+                handleError(err, LEX_ERROR, "Unclosed block comment", startLine);
+                return -1;
+            } else {
+                ungetc(nextC, stdin);
+            }
+        } else if (c == '*') {
+            int nextC = getchar();
+            if (nextC == '/') {
+                depth--;
+            } else if (nextC == EOF) {
+                handleError(err, LEX_ERROR, "Unclosed block comment", startLine);
+                return -1;
+            } else {
+                ungetc(nextC, stdin);
+            }
+        }
+    }
+
+    if (hadNewLine) {
+        while ((c = getchar()) != '\n' && c != EOF) {
+            if (isHorizSpace(c)) {
+                continue;
+            }
+            if (c == '/') {
+                int nextC = getchar();
+                if (nextC == '/') {
+                    while ((c = getchar()) != '\n' && c != EOF);
+                    break;
+                }
+            }
+            handleError(err, LEX_ERROR, "Unexpected token after multiline block comment", lineCounter);
+            return -1;
+        }
+        if (c == '\n') {
+            ungetc(c, stdin);
+        }
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
+ * @brief Handles physical newlines and continuation indentation while parenDepth > 0.
+ *
+ * @return 1 on success, 0 on error (error already set in err)
+ */
+static int consumeNewlinesInsideParens(Error *err) {
+    int spaces = 0;
+    int hadTab = 0;
+
+    while (1) {
+        int c = getchar();
+        if (c == ' ') {
+            spaces++;
+        } else if (c == '\t') {
+            hadTab = 1;
+        } else if (c == '\r') {
+            continue;
+        } else if (c == '\n') {
+            lineCounter++;
+            spaces = 0;
+            hadTab = 0;
+        } else if (c == EOF) {
+            return 1;
+        } else if (c == '/') {
+            int nextC = getchar();
+            if (nextC == '/') {
+                while ((c = getchar()) != '\n' && c != EOF);
+                if (c == '\n') {
+                    lineCounter++;
+                    spaces = 0;
+                    hadTab = 0;
+                    continue;
+                }
+                return 1;
+            } else if (nextC == '*') {
+                int res = consumeBlockComment(err);
+                if (res < 0) return 0;
+                if (res == 1) {
+                    c = getchar();
+                    if (c == '\n') {
+                        lineCounter++;
+                        spaces = 0;
+                        hadTab = 0;
+                        continue;
+                    }
+                    return 1;
+                }
+                continue;
+            } else {
+                ungetc(nextC, stdin);
+                if (hadTab) {
+                    handleError(err, LEX_ERROR, "Tabs are not allowed for indentation", lineCounter);
+                    return 0;
+                }
+                if (spaces <= currentLogicalLineIndent) {
+                    handleError(err, LEX_ERROR, "Invalid continuation indentation inside parentheses", lineCounter);
+                    return 0;
+                }
+                ungetc(c, stdin);
+                return 1;
+            }
+        } else {
+            if (hadTab) {
+                handleError(err, LEX_ERROR, "Tabs are not allowed for indentation", lineCounter);
+                return 0;
+            }
+            if (c == ')') {
+                if (spaces < currentLogicalLineIndent) {
+                    handleError(err, LEX_ERROR, "Invalid closing parenthesis indentation", lineCounter);
+                    return 0;
+                }
+            } else {
+                if (spaces <= currentLogicalLineIndent) {
+                    handleError(err, LEX_ERROR, "Invalid continuation indentation inside parentheses", lineCounter);
+                    return 0;
+                }
+            }
+            ungetc(c, stdin);
+            return 1;
+        }
+    }
+}
 
 //Obtains the next token from stdin using a finite state machine
 //Uses a buffer to hold context and a stack for emiting dedent tokens.
 Token nextToken(Error *err) {
     Token token;
+    memset(&token, 0, sizeof(Token));
     token.lineNumber = lineCounter;
     spaceCounter = 0;
-    int hadNewLine = 0;
+    int hadTabOnLine = 0;
+    int prevWasUnderscore = 0;
     LexerState state;
     int c;
 
@@ -205,6 +370,9 @@ Token nextToken(Error *err) {
                     case '\n':
                         if (parenDepth > 0) { //new line inside parens should be treated as whitespace
                             lineCounter++;
+                            if (!consumeNewlinesInsideParens(err)) {
+                                return token;
+                            }
                             token.lineNumber = lineCounter;
                             continue;
                         }
@@ -222,6 +390,12 @@ Token nextToken(Error *err) {
                         int nextC4 = getchar();
                         
                         if (nextC1 == 'm' && nextC2 == 'a' && nextC3 == 'i' && nextC4 == 'n') {
+                            int nextC5 = getchar();
+                            if (isAsciiAlnum(nextC5) || nextC5 == '_') {
+                                handleError(err, LEX_ERROR, "Expected '@main'", token.lineNumber);
+                                return token;
+                            }
+                            ungetc(nextC5, stdin);
                             token.type = TOKEN_ANNOTATION_MAIN;
                             return token;
                         } else {
@@ -238,11 +412,15 @@ Token nextToken(Error *err) {
                     case '/': {
                         int nextC = getchar();
                         if (nextC == '/') {
-                            state = LINE_COMMENT;
+                            while ((c = getchar()) != '\n' && c != EOF);
+                            if (c == '\n') {
+                                ungetc(c, stdin);
+                            }
                             continue;
                         } else if (nextC == '*') {
-                            commentDepth++;
-                            state = BLOCK_COMMENT;
+                            if (consumeBlockComment(err) < 0) {
+                                return token;
+                            }
                             continue;
                         } else { //if it actually wasn't a comment we have to ungetc the one char we read ahead and say it was a division
                             ungetc(nextC, stdin);
@@ -314,9 +492,10 @@ Token nextToken(Error *err) {
                     }
                     case '.': {
                         int nextC = getchar(); //check if nextC is a digit, if it is it's something called "Leading-dot double"
-                        if (isdigit(nextC)) {
+                        if (isAsciiDigit(nextC)) {
                             if (!appendChar(&buffer, c, err)) return token;
                             if (!appendChar(&buffer, nextC, err)) return token;
+                            prevWasUnderscore = 0;
                             state = DOUBLE;
                             continue;
                         } else {
@@ -338,6 +517,9 @@ Token nextToken(Error *err) {
                                 ungetc(nextC2, stdin);
                                 token.type = TOKEN_STRING_LITERAL;
                                 token.val.stringValue = strdup("");
+                                if (token.val.stringValue == NULL) {
+                                    handleError(err, INTERNAL_ERROR, "Memory allocation failed", token.lineNumber);
+                                }
                                 return token;
                             }
                         } else {
@@ -349,17 +531,18 @@ Token nextToken(Error *err) {
                     
                     //keywords, identifiers, all that
                     default:
-                        if (isalpha(c) || c == '_') { //alpha chars go into the buffer
+                        if (isAsciiAlpha(c) || c == '_') { //alpha chars go into the buffer
                             if (!appendChar(&buffer, c, err)) return token;
                             state = IDENTIFIER;
                             continue;
                         } 
-                        else if (isdigit(c)) { //digits go into the buffer too
+                        else if (isAsciiDigit(c)) { //digits go into the buffer too
                             if (!appendChar(&buffer, c, err)) return token;
+                            prevWasUnderscore = 0;
                             state = INT;
                             continue;
                         }
-                        else if (isspace(c)) { //this is absolutely useless
+                        else if (isHorizSpace(c)) { //this is absolutely useless
                             continue;
                         }
                         else { //somebody is trying to be funny
@@ -372,14 +555,18 @@ Token nextToken(Error *err) {
                     spaceCounter++;
                     continue;
                 }
-                else if (c == '\t') { //refuse tabs
-                    handleError(err, LEX_ERROR, "Tabs are not allowed for indentation", token.lineNumber);
-                    return token;
+                else if (c == '\t') { //refuse tabs on non-empty lines
+                    hadTabOnLine = 1;
+                    continue;
+                }
+                else if (c == '\r') {
+                    continue;
                 }
                 else if (c == '\n') { //new line
                     lineCounter++;
                     token.lineNumber = lineCounter;
                     spaceCounter = 0;
+                    hadTabOnLine = 0;
                     continue; 
                 }
                 else if (c == EOF) { //dont forget to handle indentation on EOF
@@ -408,46 +595,53 @@ Token nextToken(Error *err) {
                                 ungetc(c, stdin); //ungetc the EOF so it gets handled properly in START state
                             }
                             spaceCounter = 0; //reset this before new line !!!
+                            hadTabOnLine = 0;
                             continue;
                         } else if (nextC == '*') { //it's a block comment!
-                            commentDepth++;
-                            int prev = 0; //we have to look back at the previous char instead of the next one because comments are just weird...
-                            while ((c = getchar()) != EOF) {
-                                if (c == '\n') {
-                                    lineCounter++;
-                                    token.lineNumber = lineCounter; //so potential errors show on correct lines
-                                    spaceCounter = 0; // Reset spaces if comment spans multiple lines
-                                }
-                                if (prev == '/' && c == '*') {
-                                    commentDepth++;
-                                    prev = 0;
-                                    continue;
-                                }
-                                if (prev == '*' && c == '/') { //look back if we ended the comment or there just was a * in the comment
-                                    commentDepth--;
-                                    prev = 0;
-                                    if (commentDepth == 0) {
-                                        break;
-                                    }
-                                    continue;
-                                }
-                                prev = c;
-                            }
-                            if (c == EOF) { //we do NOT ungetc the EOF here because the block comments need to be closed before EOF
-                                handleError(err, LEX_ERROR, "Unclosed block comment", token.lineNumber);
+                            int res = consumeBlockComment(err);
+                            if (res < 0) {
                                 return token;
                             }
+                            if (res == 1) {
+                                c = getchar();
+                                if (c == '\n') {
+                                    lineCounter++;
+                                    token.lineNumber = lineCounter;
+                                    spaceCounter = 0;
+                                    hadTabOnLine = 0;
+                                    continue;
+                                } else {
+                                    ungetc(c, stdin);
+                                    continue;
+                                }
+                            }
+                            while ((c = getchar()) == ' ' || c == '\t' || c == '\r');
+                            if (c == '\n' || c == EOF) {
+                                ungetc(c, stdin);
+                                continue;
+                            }
+                            ungetc(c, stdin);
                             continue;
                         } else { // It's a division '/' at the start of the line!
                             ungetc(nextC, stdin);
                         }
                     }
 
+                    if (hadTabOnLine) { //refuse tabs
+                        handleError(err, LEX_ERROR, "Tabs are not allowed for indentation", lineCounter);
+                        return token;
+                    }
+
                     isStartOfLine = 0; //figured out it's no longer a start of line
+                    currentLogicalLineIndent = spaceCounter;
                     ungetc(c, stdin); //we know it's time to count indents now, ungetc the first now-whitespace char we found so it doesn't get lost
                     token.lineNumber = lineCounter; //
 
                     if (spaceCounter > indentStack[stackTop]) { //if there is more spaces than on the stack then we indent
+                        if (stackTop + 1 >= MAX_INDENT_STACK) {
+                            handleError(err, INTERNAL_ERROR, "Maximum indentation depth exceeded", token.lineNumber);
+                            return token;
+                        }
                         stackTop++;
                         indentStack[stackTop] = spaceCounter;
                         token.type = TOKEN_INDENT;
@@ -475,7 +669,7 @@ Token nextToken(Error *err) {
                     }
                 }
             case IDENTIFIER: //we need to find out if we are reading an identifier or a keyword
-                if (isalnum(c) || c == '_') {
+                if (isAsciiAlnum(c) || c == '_') {
                         if (!appendChar(&buffer, c, err)) return token;
                         continue;
                 } else {
@@ -490,6 +684,11 @@ Token nextToken(Error *err) {
 
                         if(token.type == TOKEN_ID) {
                             token.val.stringValue = strdup(buffer.text);
+                            if (token.val.stringValue == NULL) {
+                                free(buffer.text);
+                                handleError(err, INTERNAL_ERROR, "Memory allocation failed", token.lineNumber);
+                                return token;
+                            }
                         }
                         
                         free(buffer.text);
@@ -500,6 +699,9 @@ Token nextToken(Error *err) {
                     token.type = TOKEN_STRING_LITERAL;
                     token.val.stringValue = buffer.text ? strdup(buffer.text) : strdup("");
                     free(buffer.text);
+                    if (token.val.stringValue == NULL) {
+                        handleError(err, INTERNAL_ERROR, "Memory allocation failed", token.lineNumber);
+                    }
                     return token;
                 }
                 else if (c == '\\') {
@@ -509,6 +711,11 @@ Token nextToken(Error *err) {
                 else if (c == EOF || c == '\n') {
                     free(buffer.text);
                     handleError(err, LEX_ERROR, "Unclosed string", token.lineNumber);
+                    return token;
+                }
+                else if (c < 32 || c > 126) {
+                    free(buffer.text);
+                    handleError(err, LEX_ERROR, "Invalid character in string literal", token.lineNumber);
                     return token;
                 }
                 else {
@@ -546,6 +753,11 @@ Token nextToken(Error *err) {
                     handleError(err, LEX_ERROR, "Unclosed block string", token.lineNumber);
                     return token;
                 }
+                else if (c == '\0' || c > 127) {
+                    free(buffer.text);
+                    handleError(err, LEX_ERROR, "Invalid character in multiline string literal", token.lineNumber);
+                    return token;
+                }
                 else if(c == '\n') {
                     lineCounter++;
                     if (!appendChar(&buffer, c, err)) return token;
@@ -556,9 +768,17 @@ Token nextToken(Error *err) {
                     if (nextC1 == '"') {
                         int nextC2 = getchar();
                         if (nextC2 == '"') {
+                            int extra;
+                            while ((extra = getchar()) == '"') {
+                                if (!appendChar(&buffer, '"', err)) return token;
+                            }
+                            ungetc(extra, stdin);
                             token.type = TOKEN_STRING_LITERAL;
                             token.val.stringValue = buffer.text ? strdup(buffer.text) : strdup("");
                             free(buffer.text);
+                            if (token.val.stringValue == NULL) {
+                                handleError(err, INTERNAL_ERROR, "Memory allocation failed", token.lineNumber);
+                            }
                             return token;
                         }
                         ungetc(nextC2, stdin);
@@ -576,85 +796,129 @@ Token nextToken(Error *err) {
                     continue; 
                 }
             case INT: 
-                if (isdigit(c)) { //check if we are not reading a "Leading-0 INT"; if not then add the digit
+                if (isAsciiDigit(c)) { //check if we are not reading a "Leading-0 INT"; if not then add the digit
                     if (buffer.length == 1 && buffer.text[0] == '0') {
                         free(buffer.text);
                         handleError(err, LEX_ERROR, "Leading zeros are not allowed in integer literals", token.lineNumber);
                         return token;
                     }
+                    prevWasUnderscore = 0;
                     if (!appendChar(&buffer, c, err)) return token;
                     continue;
                 }
                 else if (c == '_') { //check if we are not reading a "Leading-0 INT"; if not then just skip the '_' and continue
-                    if (buffer.length == 1 && buffer.text[0] == '0') {
+                    if (prevWasUnderscore || (buffer.length == 1 && buffer.text[0] == '0')) {
                         free(buffer.text);
                         handleError(err, LEX_ERROR, "Leading zeros are not allowed in integer literals", token.lineNumber);
                         return token;
                     }
+                    prevWasUnderscore = 1;
                     //do NOT append, just get rid of it
                     continue;
                 }
                 else if (c == '.') { //check if the number continues after the dot, then go to double
+                    if (prevWasUnderscore) {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Underscore cannot precede decimal point", token.lineNumber);
+                        return token;
+                    }
                     int nextC = getchar();
-                    if (!isdigit(nextC)) {
+                    if (!isAsciiDigit(nextC)) {
                         free(buffer.text);
                         handleError(err, LEX_ERROR, "Digit missing after '.'", token.lineNumber);
                         return token;
                     }
                     if (!appendChar(&buffer, c, err)) return token;
                     if (!appendChar(&buffer, nextC, err)) return token;
+                    prevWasUnderscore = 0;
                     state = DOUBLE;
                     continue;
                 }
                 else if (c == 'e' || c == 'E') { //watchout for the optional '+' or '-'; if there is no digit after then throw error, otherwise go to the weird double
+                    if (prevWasUnderscore) {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Underscore cannot precede exponent", token.lineNumber);
+                        return token;
+                    }
                     if (!appendChar(&buffer, c, err)) return token;
                     int nextC = getchar();
                     if (nextC == '+' || nextC == '-') {
                         if (!appendChar(&buffer, nextC, err)) return token;
                         nextC = getchar();
                     }
-                    if (!isdigit(nextC)) {
+                    if (!isAsciiDigit(nextC)) {
                         free(buffer.text);
                         handleError(err, LEX_ERROR, "Invalid exponent in double literal", token.lineNumber);
                         return token;
                     }
                     if (!appendChar(&buffer, nextC, err)) return token;
+                    prevWasUnderscore = 0;
                     state = DOUBLE_EXP;
                     continue;
                 }
                 else { //the int ended, ungetc whatever ended it and return the token
+                    if (prevWasUnderscore || isAsciiAlpha(c) || c == '_') {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Invalid character in integer literal", token.lineNumber);
+                        return token;
+                    }
                     ungetc(c, stdin);
                     token.type = TOKEN_INT_LITERAL;
-                    token.val.intValue = (int)strtol(buffer.text, NULL, 10);
+                    token.val.intValue = (int)strtoll(buffer.text, NULL, 10);
                     free(buffer.text);
                     return token;
                 }
             case DOUBLE:
-                if (isdigit(c)) { //add a digit
+                if (isAsciiDigit(c)) { //add a digit
+                    prevWasUnderscore = 0;
                     if (!appendChar(&buffer, c, err)) return token;
                     continue;
                 }
                 else if (c == '_') {
+                    if (prevWasUnderscore) {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Consecutive underscores in double literal", token.lineNumber);
+                        return token;
+                    }
+                    prevWasUnderscore = 1;
                     //do NOT append, just get rid of it
                     continue;
                 }
                 else if (c == 'e' || c == 'E') { //watchout for the optional '+' or '-'; if there is no digit after then throw error, otherwise go to the weird double
+                    if (prevWasUnderscore) {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Underscore cannot precede exponent", token.lineNumber);
+                        return token;
+                    }
                     if (!appendChar(&buffer, c, err)) return token;
                     int nextC = getchar();
                     if (nextC == '+' || nextC == '-') {
                         if (!appendChar(&buffer, nextC, err)) return token;
                         nextC = getchar();
                     }
-                    if (!isdigit(nextC)) {
+                    if (!isAsciiDigit(nextC)) {
                         free(buffer.text);
                         handleError(err, LEX_ERROR, "Invalid exponent in double literal", token.lineNumber);
                         return token;
                     }
                     if (!appendChar(&buffer, nextC, err)) return token;
+                    prevWasUnderscore = 0;
                     state = DOUBLE_EXP;
                     continue;
                 }
                 else if (c == 'd' || c == 'D') {
+                    if (prevWasUnderscore) {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Underscore cannot precede 'd' suffix", token.lineNumber);
+                        return token;
+                    }
+                    int nextC = getchar();
+                    if (isAsciiAlnum(nextC) || nextC == '_' || nextC == '.') {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Invalid character after double literal", token.lineNumber);
+                        return token;
+                    }
+                    ungetc(nextC, stdin);
                     //do NOT append, just get rid of it, it's optional; also means the double ended, return the token (do not ungetc here, we dont care about the 'd' / 'D')
                     token.type = TOKEN_DOUBLE_LITERAL;
                     token.val.doubleValue = strtod(buffer.text, NULL);
@@ -662,6 +926,11 @@ Token nextToken(Error *err) {
                     return token;
                 }
                 else { //the double ended, ungetc whatever ended it and return the token
+                    if (prevWasUnderscore || isAsciiAlpha(c) || c == '_' || c == '.') {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Invalid character in double literal", token.lineNumber);
+                        return token;
+                    }
                     ungetc(c, stdin);
                     token.type = TOKEN_DOUBLE_LITERAL;
                     token.val.doubleValue = strtod(buffer.text, NULL);
@@ -669,15 +938,34 @@ Token nextToken(Error *err) {
                     return token;
                 }
             case DOUBLE_EXP: //(this is the weird double)
-                if (isdigit(c)) { //add a digit
+                if (isAsciiDigit(c)) { //add a digit
+                    prevWasUnderscore = 0;
                     if (!appendChar(&buffer, c, err)) return token;
                     continue;
                 }
                 else if (c == '_') {
+                    if (prevWasUnderscore) {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Consecutive underscores in double exponent", token.lineNumber);
+                        return token;
+                    }
+                    prevWasUnderscore = 1;
                     //do NOT append, just get rid of it
                     continue;
                 }
                 else if (c == 'd' || c == 'D') {
+                    if (prevWasUnderscore) {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Underscore cannot precede 'd' suffix", token.lineNumber);
+                        return token;
+                    }
+                    int nextC = getchar();
+                    if (isAsciiAlnum(nextC) || nextC == '_' || nextC == '.') {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Invalid character after double literal", token.lineNumber);
+                        return token;
+                    }
+                    ungetc(nextC, stdin);
                     //do NOT append, just get rid of it, it's optional; also means the double ended, return the token (do not ungetc here, we dont care about the 'd' / 'D')
                     token.type = TOKEN_DOUBLE_LITERAL;
                     token.val.doubleValue = strtod(buffer.text, NULL);
@@ -685,54 +973,17 @@ Token nextToken(Error *err) {
                     return token;
                 }
                 else { //the weird double ended, ungetc whatever ended it and return the token
+                    if (prevWasUnderscore || isAsciiAlpha(c) || c == '_' || c == '.') {
+                        free(buffer.text);
+                        handleError(err, LEX_ERROR, "Invalid character in double exponent", token.lineNumber);
+                        return token;
+                    }
                     ungetc(c, stdin);
                     token.type = TOKEN_DOUBLE_LITERAL;
                     token.val.doubleValue = strtod(buffer.text, NULL);
                     free(buffer.text);
                     return token;
                 }
-            case LINE_COMMENT: //just look for '\n' or EOF
-                if (c == '\n') {
-                    ungetc(c, stdin);
-                    state = START;
-                }
-                else if (c == EOF) {
-                    ungetc(c, stdin);
-                    state = START;
-                }
-                break;
-            case BLOCK_COMMENT: //count nested comments and exit if commentDepth == 0; + look for EOF
-                if (c == '/') {
-                    int nextC = getchar();
-                    if (nextC == '*') {
-                        commentDepth++;
-                    } else {
-                        ungetc(nextC, stdin);
-                    }
-                } else if (c == '*') {
-                    int nextC = getchar();
-                    if (nextC == '/') {
-                        commentDepth--;
-                        if (commentDepth == 0) {
-                            if (hadNewLine && parenDepth == 0) {
-                                isStartOfLine = 1;
-                                token.lineNumber = lineCounter;
-                                token.type = TOKEN_EOL;
-                                return token;
-                            }
-                            state = START;
-                        }
-                    } else {
-                        ungetc(nextC, stdin);
-                    }
-                } else if (c == '\n') {
-                    lineCounter++;
-                    hadNewLine = 1;
-                } else if (c == EOF) {
-                    handleError(err, LEX_ERROR, "Unclosed block comment", token.lineNumber);
-                    return token;
-                }
-                break;
             default: //keep this here so gcc -Wall -Wextra doesn't complain
                 //if we get here something is VERY WRONG
                 break;
