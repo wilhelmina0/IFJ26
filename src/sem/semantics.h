@@ -9,7 +9,6 @@
  * - Radim Winter
  *
  */
-
 #ifndef SEMANTICS_H
 #define SEMANTICS_H
 
@@ -30,11 +29,12 @@ typedef struct {
  * Adds types, symbol identifiers and Int-to-Double conversion flags to the AST.
  * Temporary symbol tables are freed before returning. The caller owns the AST.
  * Only use the annotated AST for generation after SUCCESS; on failure some nodes
- * may already be annotated. This function does not call the generator or print.
+ * may already be annotated. This function does not call the generator.
+ * Internal errors are printed by handleError and terminate the compiler with code 99.
  *
  * @param program Complete AST_PROGRAM root with the layout in ast.h.
  * @param err Optional error output; may be NULL.
- * @return SUCCESS, the first semantic/syntax error, or INTERNAL_ERROR.
+ * @return SUCCESS or the first semantic/syntax error.
  */
 ErrorCode semanticsRun(Node *program, SemanticError *err);
 
