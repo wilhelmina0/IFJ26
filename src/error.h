@@ -46,3 +46,4 @@ static inline void printError(Error *err) {
 }
 
 #endif //ERROR_H
+

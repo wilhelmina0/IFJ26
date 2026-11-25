@@ -23,6 +23,7 @@ typedef enum {
     TOKEN_ANNOTATION_MAIN,   /**< The '\@main' annotation (treated as a single token) */
     TOKEN_INDENT,            /**< Increase in indentation level */
     TOKEN_DEDENT,            /**< Decrease in indentation level */
+    TOKEN_UNDERSCORE,        /**< Character: '_' */
 
     // Keywords
     TOKEN_KW_DEF,            /**< Keyword: def */
@@ -86,3 +87,4 @@ typedef struct TOKEN
 } Token;
 
 #endif //TOKEN_H
+
