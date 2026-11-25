@@ -128,10 +128,7 @@ static int appendChar(StringBuffer *buffer, int c, Error *err) {
 static TokenType findKeyword(const char *text, const int len, Error *err) {
     switch (len) {
         case 1:
-            if (text[0] == '_') {
-                handleError(err, LEX_ERROR, "'_' itself cannot be an identifier", lineCounter);
-                return TOKEN_EOF;
-            }
+            if (text[0] == '_') return TOKEN_UNDERSCORE;
             break;
         case 2:
             if (text[0] == 'd' && text[1] == 'o') return TOKEN_KW_DO;
@@ -490,20 +487,9 @@ Token nextToken(Error *err) {
                         token.type = TOKEN_RPAREN; 
                         return token;
                     }
-                    case '.': {
-                        int nextC = getchar(); //check if nextC is a digit, if it is it's something called "Leading-dot double"
-                        if (isAsciiDigit(nextC)) {
-                            if (!appendChar(&buffer, c, err)) return token;
-                            if (!appendChar(&buffer, nextC, err)) return token;
-                            prevWasUnderscore = 0;
-                            state = DOUBLE;
-                            continue;
-                        } else {
-                            ungetc(nextC, stdin);
-                            token.type = TOKEN_DOT;
-                            return token;
-                        }
-                    }
+                    case '.':
+                        token.type = TOKEN_DOT;
+                        return token;
                     //strings
                     //we have to look 2 chars ahead in case it's a block comment, in case it wasn't we have to ungetc the 2 chars (watchout for the ungetc order)
                     case '"': {
@@ -753,7 +739,7 @@ Token nextToken(Error *err) {
                     handleError(err, LEX_ERROR, "Unclosed block string", token.lineNumber);
                     return token;
                 }
-                else if (c == '\0' || c > 127) {
+                else if ((c < 32 && c != '\n' && c != '\r' && c != '\t') || c > 126) {
                     free(buffer.text);
                     handleError(err, LEX_ERROR, "Invalid character in multiline string literal", token.lineNumber);
                     return token;
@@ -990,3 +976,4 @@ Token nextToken(Error *err) {
         }
     }
 } //the end - yaaaay :D
+

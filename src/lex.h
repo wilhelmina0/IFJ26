@@ -28,3 +28,4 @@
 Token nextToken(Error *err);
 
 #endif // LEX_INIT_H
+
