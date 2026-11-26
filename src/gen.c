@@ -13,7 +13,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-#include "init.h"
+#include <string.h>
+#include "gen.h"
 
 //macro for arbitrary values so they don't appear so magical
 //increase for less kernel calls
