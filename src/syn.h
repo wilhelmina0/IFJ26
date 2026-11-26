@@ -48,8 +48,8 @@ char *copyStr(const char *str);
 bool parseProlog(Parser *parser);       // checks prolog
 Node *parseProgram(Parser *parser);     // checks prolog, functions and EOF
 
-Node *parseFunction(Parser *parser);
-Node *parseBlock(Parser *parser);
+Node *parseFunction(Parser *parser);  // function
+Node *parseBlock(Parser *parser);     // block
 TokenType statementFortune(Parser *parser);
 Node *parseStatement(Parser *parser);
 
@@ -57,23 +57,23 @@ Node *parseCall(Parser *parser, Node *id);    // for function calls (print, ...)
 Node *parseExpression(Parser *parser); // expr
 Node *parseAssignment(Parser *parser, Node *id); // assign
 
-Node *parseReturn(Parser *parser);
-Node *parseDecl(Parser *parser);
+Node *parseReturn(Parser *parser); // return
+Node *parseDecl(Parser *parser);  // var / val declaration
 
-bool parseParams(Parser *parser, List *params);
-bool parseType(Parser *parser, DeclType *type);
+bool parseParams(Parser *parser, List *params); // parameters
+bool parseType(Parser *parser, DeclType *type); // data type
 
-Node *parseLiteral(Parser *parser);
-Node *parseTerm(Parser *parser);
-Node *parseId(Parser *parser);
+Node *parseLiteral(Parser *parser); // literals
+Node *parseTerm(Parser *parser);    // terminals
+Node *parseId(Parser *parser);      // identifiers
 
-Node *parseIf(Parser *parser);
-Node *parseWhile(Parser *parser);
+Node *parseIf(Parser *parser);      // if then else
+Node *parseWhile(Parser *parser);   // while loop
 
 /* ======================== PRECEDENCE ========================== */
 // for expressions
 typedef enum {
-    NEG,     // !
+    UNARY,
     OPERAND,
     ADD_SUB, // + -
     MUL_DIV, // * /
@@ -97,7 +97,7 @@ typedef struct {
 
 typedef struct {
     StackEl *el;
-    int top; // num of elements, top = el[top-1]
+    size_t top; // num of elements, top = el[top-1]
     size_t capacity;
     Error error;
 } Stack;
