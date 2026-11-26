@@ -386,7 +386,11 @@ Node *parseId(Parser *parser) {
         return NULL;
     }
 
-    parseNext(parser);
+    if (!parseNext(parser)) {
+        destroyAST(id);
+        handleError(&parser->error, parser->error.code, parser->error.message, parser->error.line);
+        return NULL;
+    }
     return id;
 }
 
