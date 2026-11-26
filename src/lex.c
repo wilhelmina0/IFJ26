@@ -125,7 +125,7 @@ static int appendChar(StringBuffer *buffer, int c, Error *err) {
 * 
 * @return Token type
 */
-static TokenType findKeyword(const char *text, const int len, Error *err) {
+static TokenType findKeyword(const char *text, const int len) {
     switch (len) {
         case 1:
             if (text[0] == '_') return TOKEN_UNDERSCORE;
