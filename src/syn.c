@@ -367,7 +367,7 @@ Node *parseLiteral(Parser *parser) {
  * @return id node on success else NULL
  */
 Node *parseId(Parser *parser) {
-    if(!checkType(parser, TOKEN_ID)) {
+    if(!checkType(parser, TOKEN_ID) || checkType(parser, TOKEN_UNDERSCORE)) {
         handleError(&parser->error, SYN_ERROR, "Expected 'id'", parser->currentToken.lineNumber);
         return NULL;
     }
