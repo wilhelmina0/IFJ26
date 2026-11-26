@@ -53,3 +53,4 @@ static inline void handleError(Error *err, ErrorCode code, const char *message, 
 }
 
 #endif //ERROR_H
+

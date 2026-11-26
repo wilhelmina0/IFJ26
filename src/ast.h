@@ -12,7 +12,7 @@
 #ifndef AST_H
 #define AST_H
 
-#include "lex/lex.h"
+#include "token.h"
 #include "list.h"
 
 #include <stdio.h>
