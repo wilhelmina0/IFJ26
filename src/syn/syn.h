@@ -1,5 +1,5 @@
 /**
-* @file init.h
+* @file syn.h
  *
  * @brief Structure of parser
  *
@@ -11,19 +11,23 @@
 #ifndef SYN_INIT_H
 #define SYN_INIT_H
 
-#include "../lex/init.h"   // temporary -> token has to be shared
-#include "../ast/ast.h"    // AST structure
-#include "../core/error.h" // error handling
+#include "../ast.h"
+#include "../error.h"
+#include "../lex/lex.h"
+
 
 #include <stdbool.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* ======================== PARSER ========================== */
 typedef struct {
     Token currentToken;
     Token previousToken;
+
+    bool fortuneTell; // rika jestli je treba znat hodnotu dalsiho tokenu
+    Token fortune; // "predpovi" dalsi token bez toho aniz by ho snedl
 
     Error error;
 } Parser;
@@ -32,7 +36,7 @@ void freeToken(Token *token);   // for tokens that use strdup()
 void synClean(Parser *parser);  // when parser is finished
 
 void parserInit(Parser *parser);  // sets the current token w/ nextToken() from lex
-void parseNext(Parser *parser);   // moves onto the next token
+bool parseNext(Parser *parser);   // moves onto the next token
 
 bool checkType(Parser *parser, TokenType type);                // checks the token type
 bool same(Parser *parser, TokenType type);                      // checks type moves onto next
@@ -46,11 +50,15 @@ Node *parseProgram(Parser *parser);     // checks prolog, functions and EOF
 
 Node *parseFunction(Parser *parser);
 Node *parseBlock(Parser *parser);
+TokenType statementFortune(Parser *parser);
+Node *parseStatement(Parser *parser);
+
 Node *parseCall(Parser *parser, Node *id);    // for function calls (print, ...)
 Node *parseExpression(Parser *parser); // expr
 Node *parseAssignment(Parser *parser, Node *id); // assign
 
-Node *parseStatement(Parser *parser);
+Node *parseReturn(Parser *parser);
+Node *parseDecl(Parser *parser);
 
 bool parseParams(Parser *parser, List *params);
 bool parseType(Parser *parser, DeclType *type);
@@ -58,6 +66,9 @@ bool parseType(Parser *parser, DeclType *type);
 Node *parseLiteral(Parser *parser);
 Node *parseTerm(Parser *parser);
 Node *parseId(Parser *parser);
+
+Node *parseIf(Parser *parser);
+Node *parseWhile(Parser *parser);
 
 /* ======================== PRECEDENCE ========================== */
 // for expressions
