@@ -16,7 +16,7 @@
 #include <string.h>
 #include "lex.h"
 
-#define MAX_INDENT_STACK 1024
+#define MAX_INDENT_STACK 1024 //if somebody reaches this limit send them to the psychward
 
 //counters
 static int lineCounter = 1;
@@ -59,18 +59,42 @@ typedef struct {
     int capacity;
 } StringBuffer;
 
+/**
+ * @brief Checks if a char is ('a'-'z' or 'A'-'Z').
+ *
+ * @param c Character to check.
+ * @return Non-zero if @p c is an ASCII letter, 0 otherwise.
+ */
 static inline int isAsciiAlpha(int c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
+/**
+ * @brief Checks if a char is ('0'-'9').
+ *
+ * @param c Character to check.
+ * @return Non-zero if @p c is ('0'-'9'), 0 otherwise.
+ */
 static inline int isAsciiDigit(int c) {
     return (c >= '0' && c <= '9');
 }
 
+/**
+ * @brief Checks if a char is an alphanum.
+ *
+ * @param c Character to check.
+ * @return Non-zero if @p c is an alphanum 0 otherwise.
+ */
 static inline int isAsciiAlnum(int c) {
     return isAsciiAlpha(c) || isAsciiDigit(c);
 }
 
+/**
+ * @brief Checks if a char is (' ', '\t', or '\r').
+ *
+ * @param c Character to check.
+ * @return Non-zero if @p c is (' ', '\t', or '\r'), 0 otherwise.
+ */
 static inline int isHorizSpace(int c) {
     return c == ' ' || c == '\t' || c == '\r';
 }
@@ -162,11 +186,10 @@ static TokenType findKeyword(const char *text, const int len) {
 /**
  * @brief Consumes a nested block comment after "/*" has already been read.
  *
- * If the block comment contains a newline, verifies that no tokens follow it
- * on the same physical line and pushes the terminating '\n' back to stdin.
+ * If the block comment contains a newline, verifies that no tokens follow it on the same line and pushes the terminating '\n' back to stdin.
  *
- * @return  0 if single-line block comment (acts as whitespace)
- *          1 if multi-line block comment (acts as EOL)
+ * @return  0 if single-line block comment (= whitespace)
+ *          1 if multi-line block comment (= EOL)
  *         -1 on lexical error (error already set in err)
  */
 static int consumeBlockComment(Error *err) {
@@ -175,7 +198,7 @@ static int consumeBlockComment(Error *err) {
     int startLine = lineCounter;
     int c;
 
-    while (depth > 0) {
+    while (depth > 0) { //go through all the nested comments
         c = getchar();
         if (c == EOF) {
             handleError(err, LEX_ERROR, "Unclosed block comment", startLine);
@@ -184,39 +207,57 @@ static int consumeBlockComment(Error *err) {
         if (c == '\n') {
             lineCounter++;
             hadNewLine = 1;
-        } else if (c == '/') {
+        }
+        else if (c == '/') { //comment inside comment, increase depth
             int nextC = getchar();
             if (nextC == '*') {
                 depth++;
-            } else if (nextC == EOF) {
+            }
+            else if (nextC == EOF) {
                 handleError(err, LEX_ERROR, "Unclosed block comment", startLine);
                 return -1;
-            } else {
+            }
+            else { //ungetc if it's anything else than a new comment or eof
                 ungetc(nextC, stdin);
             }
-        } else if (c == '*') {
+        }
+        else if (c == '*') { //comment ended, decrease depth
             int nextC = getchar();
             if (nextC == '/') {
                 depth--;
-            } else if (nextC == EOF) {
+            }
+            else if (nextC == EOF) {
                 handleError(err, LEX_ERROR, "Unclosed block comment", startLine);
                 return -1;
-            } else {
+            }
+            else {
                 ungetc(nextC, stdin);
             }
         }
     }
 
+    //multiline block comments MUST act as an EOL, so no code can be on the same line as "*/"
+    //doesn't apply to single line block comments
     if (hadNewLine) {
         while ((c = getchar()) != '\n' && c != EOF) {
             if (isHorizSpace(c)) {
                 continue;
             }
-            if (c == '/') {
+            if (c == '/') { //line comments are allowed
                 int nextC = getchar();
                 if (nextC == '/') {
                     while ((c = getchar()) != '\n' && c != EOF);
                     break;
+                }
+                if (nextC == '*') { //we have to handle chained block comments /*..\n..*/ /*...*/
+                    int res = consumeBlockComment(err);
+                    if (res < 0) {
+                        return -1;
+                    }
+                    if (res == 1) {
+                        return 1;
+                    }
+                    continue;
                 }
             }
             handleError(err, LEX_ERROR, "Unexpected token after multiline block comment", lineCounter);
@@ -234,7 +275,7 @@ static int consumeBlockComment(Error *err) {
 /**
  * @brief Handles physical newlines and continuation indentation while parenDepth > 0.
  *
- * @return 1 on success, 0 on error (error already set in err)
+ * @return 1 on success, 0 on error.
  */
 static int consumeNewlinesInsideParens(Error *err) {
     int spaces = 0;
@@ -242,19 +283,24 @@ static int consumeNewlinesInsideParens(Error *err) {
 
     while (1) {
         int c = getchar();
+        //take note of escape sequences
         if (c == ' ') {
             spaces++;
-        } else if (c == '\t') {
+        }
+        else if (c == '\t') {
             hadTab = 1;
-        } else if (c == '\r') {
+        }
+        else if (c == '\r') {
             continue;
-        } else if (c == '\n') {
+        }
+        else if (c == '\n') {
             lineCounter++;
             spaces = 0;
             hadTab = 0;
         } else if (c == EOF) {
             return 1;
-        } else if (c == '/') {
+        }
+        else if (c == '/') { //comment inside parens handling
             int nextC = getchar();
             if (nextC == '/') {
                 while ((c = getchar()) != '\n' && c != EOF);
@@ -661,7 +707,7 @@ Token nextToken(Error *err) {
                 } else {
                         ungetc(c, stdin);
                         
-                        token.type = findKeyword(buffer.text, buffer.length, err);
+                        token.type = findKeyword(buffer.text, buffer.length);
                         
                         if (err->code != SUCCESS) { //check if we passed findKeyword
                             free(buffer.text);
@@ -753,7 +799,7 @@ Token nextToken(Error *err) {
                     int nextC1 = getchar();
                     if (nextC1 == '"') {
                         int nextC2 = getchar();
-                        if (nextC2 == '"') {
+                        if (nextC2 == '"') { //if there is an extra '"', then it's part of the comment
                             int extra;
                             while ((extra = getchar()) == '"') {
                                 if (!appendChar(&buffer, '"', err)) return token;
