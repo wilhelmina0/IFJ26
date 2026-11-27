@@ -14,6 +14,6 @@
 
 #include "ast.h"
 
-char *codeGen(Node top);
+char *codeGen(Node top, Error *err);
 
 #endif //INIT_H
