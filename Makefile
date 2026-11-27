@@ -6,6 +6,7 @@ SOURCE := src/main.c \
 	src/ast.c \
 	src/sem.c \
 	src/gen.c \
+	src/symtable.c\
 
 
 BUILD = build/ifj26

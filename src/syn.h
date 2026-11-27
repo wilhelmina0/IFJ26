@@ -14,6 +14,7 @@
 #include "token.h"
 #include "ast.h"
 #include "error.h"
+#include "lex.h"
 
 
 #include <stdbool.h>

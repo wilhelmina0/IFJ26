@@ -13,6 +13,7 @@
 #define GEN_INIT_H
 
 #include "ast.h"
+#include "error.h"
 
 char *codeGen(Node top, Error *err);
 

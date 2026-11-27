@@ -138,7 +138,6 @@ static void defineVariable(AnalysisState *state, Error *error, Node *node, const
                                                 : &node->data.varDeclaration.symbol;
         free(*slot);
         *slot = owned;
-        node->symbolId = symbol.id;
         ++state->nextId;
     }
 }
@@ -173,7 +172,6 @@ static DeclType checkCall(AnalysisState *state, Error *error, Node *node) {
     const Builtin *builtin = NULL;
     // look up user functions before built-ins
     if (symtableFind(state->functions, name, &symbol)) {
-        node->symbolId = symbol.id;
         node->data.call.symbol = symbol.declaration->data.function.symbol;
         function = symbol.declaration;
         info = &state->functionInfo[symbol.id - 1];
@@ -305,7 +303,6 @@ static DeclType checkExpression(AnalysisState *state, Error *error, Node *node, 
         return TYPE_UNSPECIFIED;
     }
     node->convertToDouble = false;
-    node->symbolId = 0;
     DeclType type = TYPE_UNSPECIFIED;
     Symbol symbol;
     switch (node->type) {
@@ -328,7 +325,6 @@ static DeclType checkExpression(AnalysisState *state, Error *error, Node *node, 
             handleError(error, SEM_ERROR_UNDEFINED, "Undefined variable.", node ? node->line : 0);
         } else {
             type = symbol.type;
-            node->symbolId = symbol.id;
         }
         break;
     case AST_CALL:
@@ -399,7 +395,6 @@ static Flow checkStatement(AnalysisState *state, Error *error, Node *node) {
         handleError(error, INTERNAL_ERROR, "Invalid statement children in AST.", node ? node->line : 0);
         return flow;
     }
-    node->symbolId = 0;
     node->convertToDouble = false;
     Symbol symbol;
     switch (node->type) {
@@ -432,7 +427,7 @@ static Flow checkStatement(AnalysisState *state, Error *error, Node *node) {
         }
 
         // store the resolved variable type in the node
-        node->valueType = expected;
+        node->data.varDeclaration.declType = expected;
         return flow;
     }
     case AST_ASSIGN: {
@@ -453,7 +448,6 @@ static Flow checkStatement(AnalysisState *state, Error *error, Node *node) {
         if (!compatible(value, actual, symbol.type)) {
             handleError(error, SEM_ERROR_NOMATCH, "Incompatible assignment type.", node ? node->line : 0);
         }
-        node->symbolId = symbol.id;
         break;
     }
     case AST_RETURN:
@@ -554,7 +548,7 @@ static void checkFunctionResult(Error *error, Node *function, Node *body, Flow r
     function->valueType = expected;
     if (function->data.function.symbol)
         function->data.function.symbol->type = expected;
-    if (error->code == SUCCESS && function->data.function.main && expected != TYPE_UNIT) {
+    if (error->code == SUCCESS && function->data.function.isMain && expected != TYPE_UNIT) {
         handleError(error, SEM_ERROR_NOMATCH, "Entry function must return Unit.", function ? function->line : 0);
     }
 }
@@ -639,7 +633,6 @@ static void firstPass(AnalysisState *state, Error *error, Node *program) {
         state->functionInfo[i].node = fn;
         fn->valueType = TYPE_UNSPECIFIED;
         fn->convertToDouble = false;
-        fn->symbolId = i + 1;
         DeclType type = fn->data.function.returnType;
         if (type != TYPE_UNSPECIFIED && !isUserType(type)) {
             handleError(error, SEM_ERROR_UNDEFINED, "Invalid return type.", fn ? fn->line : 0);
@@ -672,7 +665,7 @@ static void firstPass(AnalysisState *state, Error *error, Node *program) {
         if (code != SUCCESS) {
             handleError(error, code, "Duplicate function or symbol table error.", fn ? fn->line : 0);
         }
-        if (fn->data.function.main) {
+        if (fn->data.function.isMain) {
             ++mainCount;
             if (mainCount > 1) {
                 handleError(error, SEM_ERROR_REDEFINED, "Multiple entry functions.", fn ? fn->line : 0);

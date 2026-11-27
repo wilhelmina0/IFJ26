@@ -62,106 +62,108 @@ struct Symbol;
 // structure of AST node
 typedef struct Node Node;
 struct Node{
+    bool convertToDouble;
 
-     NodeType type;
-     int line;
+    NodeType type;
+    int line;
+    DeclType valueType;
 
-     Node **children; // for nodes with variable child count
-     size_t childCount;
-     size_t childCapacity;
+    Node **children; // for nodes with variable child count
+    size_t childCount;
+    size_t childCapacity;
 
-     union {
-         // PROGRAM
-         struct {
-            List declarations;
-         } program;
+    union {
+        // PROGRAM
+        struct {
+        List declarations;
+        } program;
 
-         // LITERALS
-         struct {
-             char *id;
-         } identifier;
+        // LITERALS
+        struct {
+            char *id;
+        } identifier;
 
-         struct {
-             int value;
-         } intLiteral;
+        struct {
+            int value;
+        } intLiteral;
 
-         struct {
-             double value;
-         } doubleLiteral;
+        struct {
+            double value;
+        } doubleLiteral;
 
-         struct {
-             char *string;
-         } stringLiteral;
+        struct {
+            char *string;
+        } stringLiteral;
 
-         // FUNCTION, PARAM, BLOCK, CALL
-         struct {
-             char *id;
-             bool isMain;
-             // main -> isMain
-             List params;
-             Node *body;
-             DeclType returnType;
-             struct Symbol *symbol;
-         } function;
+        // FUNCTION, PARAM, BLOCK, CALL
+        struct {
+            char *id;
+            bool isMain;
+            // main -> isMain
+            List params;
+            Node *body;
+            DeclType returnType;
+            struct Symbol *symbol;
+        } function;
 
-         struct {
-             char *id;
-             DeclType declType;
-             struct Symbol *symbol;
-         } parameter;
+        struct {
+            char *id;
+            DeclType declType;
+            struct Symbol *symbol;
+        } parameter;
 
-         struct {
-             List statements;
-         } block;
+        struct {
+            List statements;
+        } block;
 
-         struct {
-             char *id;
-             List args;
-             struct Symbol *symbol;
-         } call;
+        struct {
+            char *id;
+            List args;
+            struct Symbol *symbol;
+        } call;
 
-         // ASSIGNMENT
-         struct {
-             char *name;
-             Node *value;
-         } assignment;
+        // ASSIGNMENT
+        struct {
+            char *name;
+            Node *value;
+        } assignment;
 
-         // VARIABLE DECLARATION
-         struct {
-             char *id;
-             Node *initializer;
-             bool mutable;
-             DeclType declType;
-             struct Symbol *symbol;
-         } varDeclaration;
+        // VARIABLE DECLARATION
+        struct {
+            char *id;
+            Node *initializer;
+            bool mutable;
+            DeclType declType;
+            struct Symbol *symbol;
+        } varDeclaration;
 
-         // EXPRESSION
-         struct {
-             TokenType op;
-             Node *left, *right;
-         } binary;
+        // EXPRESSION
+        struct {
+            TokenType op;
+            Node *left, *right;
+        } binary;
 
-         struct {
-             TokenType op;
-             Node *operand;
-         } unary;
+        struct {
+            TokenType op;
+            Node *operand;
+        } unary;
 
-         // RETURN
-         struct {
-             Node *value; // can be NULL
-         } returnNode;
+        // RETURN
+        struct {
+            Node *value; // can be NULL
+        } returnNode;
 
-         // IF, WHILE
-         struct {
-             Node *cond;
-             Node *branchThen;
-             Node *branchElse;
-         } ifNode;
+        // IF, WHILE
+        struct {
+            Node *cond;
+            Node *branchThen;
+            Node *branchElse;
+        } ifNode;
 
-         struct {
-             Node *cond;
-             Node *body;
-         } whileNode;
+        struct {
+            Node *cond;
+            Node *body;
+        } whileNode;
 
      } data;
 };

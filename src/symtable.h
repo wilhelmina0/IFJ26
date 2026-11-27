@@ -13,8 +13,8 @@
 #include "error.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include "ast.h"
 
-typedef struct Node Node;
 typedef struct SymTable SymTable;
 
 typedef enum { SYMBOL_VARIABLE, SYMBOL_FUNCTION } SymbolKind;

@@ -528,7 +528,7 @@ char *codeGen(Node top, Error *err) {
                             if (funcCount < 512) {
                                 funcs[funcCount++] = decl;
                             }
-                            if (decl->data.function.main) {
+                            if (decl->data.function.isMain) {
                                 mainId = decl->data.function.id;
                             }
                         }

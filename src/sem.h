@@ -14,8 +14,7 @@
 #define SEM_INIT_H
 
 #include "error.h"
-
-typedef struct Node Node;
+#include "ast.h"
 
 /** Details of the first error found during semantic analysis. */
 typedef struct {
