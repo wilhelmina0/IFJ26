@@ -8,6 +8,13 @@
  * @authors
  * - Radim Winter
  *
+ * @par AI prompt (English summary)
+ * Adapt my semantics and symbol table to the supplied project materials and
+ * colleague feedback. Use a balanced tree, use the actual AST interface,
+ * and keep simple camelCase code with English documentation.
+ * The original user wording is recorded in AI_USAGE.md.
+ *
+ * @note AI-assisted reference code (ChatGPT); see AI_USAGE.md for the prompt.
  */
 #ifndef SEMANTICS_H
 #define SEMANTICS_H
