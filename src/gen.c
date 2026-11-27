@@ -99,6 +99,7 @@ typedef struct {
         NIL
     } type;
     DeclType dataType;
+    uint32_t varId;
     union {
         int64_t tempNum;
         double real;
@@ -166,14 +167,15 @@ static inline void stackDtor(stack_t *stack) {
 
 typedef struct {
     const char *name;
+    uint32_t id;
     DeclType type;
 } varType_t;
 
-static DeclType getVarType(const varType_t *vars, uint32_t count, const char *name) {
+static const varType_t *lookupVar(const varType_t *vars, uint32_t count, const char *name) {
     for (int i = (int)count - 1; i >= 0; i--) {
-        if (!strcmp(vars[i].name, name)) return vars[i].type;
+        if (!strcmp(vars[i].name, name)) return &vars[i];
     }
-    return TYPE_UNSPECIFIED;
+    return NULL;
 }
 
 // paramIdx < 0 returns function returnType; paramIdx >= 0 returns that parameter's DeclType
@@ -231,10 +233,18 @@ static void appendEscapedStr(betterString_t *dst, const char *s) {
     }
 }
 
+static void appendLocalVar(betterString_t *dst, const char *name, uint32_t varId) {
+    if (varId > 0) {
+        appendF(dst, "LF@_%s_%u", name, varId);
+    } else {
+        appendF(dst, "LF@_%s", name);
+    }
+}
+
 void printSymbol(retVal_t retVal, betterString_t *string) {
     switch (retVal.type) {
         case VAR:
-            appendF(string, "LF@_%s", retVal.value.retString);
+            appendLocalVar(string, retVal.value.retString, retVal.varId);
             break;
         case INT:
             appendF(string, "int@%ld", (long)retVal.value.tempNum);
@@ -414,8 +424,8 @@ static const char *builtinCode =
 "jumpifeq $$substr_err LF@c bool@true\n"
 "gt LF@c LF@b LF@e\n"
 "jumpifeq $$substr_err LF@c bool@true\n"
-"lt LF@c LF@b LF@len\n"
-"jumpifeq $$substr_err LF@c bool@false\n"
+"gt LF@c LF@b LF@len\n"
+"jumpifeq $$substr_err LF@c bool@true\n"
 "gt LF@c LF@e LF@len\n"
 "jumpifeq $$substr_err LF@c bool@true\n"
 "defvar LF@r\n"
@@ -498,6 +508,7 @@ char *codeGen(Node top, Error *err) {
 
     varType_t vars[512];
     uint32_t varCount = 0;
+    uint32_t nextVarId = 1;
 
     Node *funcs[512];
     uint32_t funcCount = 0;
@@ -554,6 +565,7 @@ char *codeGen(Node top, Error *err) {
             case AST_FUNCTION:
                 if (frame->new == true) {
                     varCount = 0;
+                    nextVarId = 1;
                     currentFnRetType = frame->currentNode->data.function.returnType;
                     appendF(&output, "label $_%s\npushframe\n", frame->currentNode->data.function.id);
                     fnStart = output.top;
@@ -584,11 +596,16 @@ char *codeGen(Node top, Error *err) {
                         break;
                     }
                 } else if (frame->childCTR == 0) {
+                    uint32_t vid = nextVarId++;
                     if (varCount < 512) {
-                        vars[varCount++] = (varType_t){ retVal.value.retString, retVal.dataType };
+                        vars[varCount++] = (varType_t){ retVal.value.retString, vid, retVal.dataType };
                     }
-                    appendF(&fnDefs, "defvar LF@_%s\n", retVal.value.retString);
-                    appendF(&output, "pops LF@_%s\n", retVal.value.retString);
+                    appendF(&fnDefs, "defvar ");
+                    appendLocalVar(&fnDefs, retVal.value.retString, vid);
+                    appendF(&fnDefs, "\n");
+                    appendF(&output, "pops ");
+                    appendLocalVar(&output, retVal.value.retString, vid);
+                    appendF(&output, "\n");
 
                     listNext(frame->extra);
                     if (frame->extra->active != NULL) {
@@ -605,6 +622,7 @@ char *codeGen(Node top, Error *err) {
                     frame->childCTR++;
                     retVal.type = NIL;
                     retVal.dataType = TYPE_UNIT;
+                    retVal.varId = 0;
                     STATIC_RECURSE(data.function.body);
                     break;
                 } else {
@@ -648,12 +666,11 @@ char *codeGen(Node top, Error *err) {
             case AST_VARDECL:
                 if (frame->new) {
                     frame->new = false;
+                    frame->reserve = nextVarId++;
                     char *id = frame->currentNode->data.varDeclaration.id;
-                    char defLine[256];
-                    snprintf(defLine, sizeof(defLine), "defvar LF@_%s\n", id);
-                    if (strstr(fnDefs.data, defLine) == NULL) {
-                        appendF(&fnDefs, "%s", defLine);
-                    }
+                    appendF(&fnDefs, "defvar ");
+                    appendLocalVar(&fnDefs, id, frame->reserve);
+                    appendF(&fnDefs, "\n");
                     STATIC_RECURSE(data.varDeclaration.initializer);
                     break;
                 } else {
@@ -661,18 +678,22 @@ char *codeGen(Node top, Error *err) {
                     if (t == TYPE_UNSPECIFIED) {
                         t = retVal.dataType;
                     }
+                    uint32_t vid = frame->reserve;
                     if (varCount < 512) {
-                        vars[varCount++] = (varType_t){ frame->currentNode->data.varDeclaration.id, t };
+                        vars[varCount++] = (varType_t){ frame->currentNode->data.varDeclaration.id, vid, t };
                     }
                     if (t == TYPE_DOUBLE) {
                         promoteToDouble(&retVal, &fnDefs, &output, &tempCTR);
                     }
-                    appendF(&output, "move LF@_%s ", frame->currentNode->data.varDeclaration.id);
+                    appendF(&output, "move ");
+                    appendLocalVar(&output, frame->currentNode->data.varDeclaration.id, vid);
+                    appendF(&output, " ");
                     printSymbol(retVal, &output);
                     appendF(&output, "\n");
 
                     retVal.type = NIL;
                     retVal.dataType = TYPE_UNIT;
+                    retVal.varId = 0;
                     frame = popFrame(&stack);
                     break;
                 }
@@ -683,16 +704,20 @@ char *codeGen(Node top, Error *err) {
                     STATIC_RECURSE(data.assignment.value);
                     break;
                 } else {
-                    DeclType dstType = getVarType(vars, varCount, frame->currentNode->data.assignment.name);
-                    if (dstType == TYPE_DOUBLE) {
+                    const varType_t *v = lookupVar(vars, varCount, frame->currentNode->data.assignment.name);
+                    uint32_t vid = v ? v->id : 0;
+                    if (v && v->type == TYPE_DOUBLE) {
                         promoteToDouble(&retVal, &fnDefs, &output, &tempCTR);
                     }
-                    appendF(&output, "move LF@_%s ", frame->currentNode->data.assignment.name);
+                    appendF(&output, "move ");
+                    appendLocalVar(&output, frame->currentNode->data.assignment.name, vid);
+                    appendF(&output, " ");
                     printSymbol(retVal, &output);
                     appendF(&output, "\n");
 
                     retVal.type = NIL;
                     retVal.dataType = TYPE_UNIT;
+                    retVal.varId = 0;
                     frame = popFrame(&stack);
                     break;
                 }
@@ -732,20 +757,25 @@ char *codeGen(Node top, Error *err) {
                     retVal.type = TEMP;
                     retVal.value.tempNum = (int64_t)frame->reserve;
                     retVal.dataType = getFuncType(funcs, funcCount, frame->currentNode->data.call.id, -1);
+                    retVal.varId = 0;
                     frame = popFrame(&stack);
                     break;
                 }
 
-            case AST_IDENTIFIER:
+            case AST_IDENTIFIER: {
+                const varType_t *v = lookupVar(vars, varCount, frame->currentNode->data.identifier.id);
                 retVal.type = VAR;
                 retVal.value.retString = frame->currentNode->data.identifier.id;
-                retVal.dataType = getVarType(vars, varCount, retVal.value.retString);
+                retVal.varId = v ? v->id : 0;
+                retVal.dataType = v ? v->type : TYPE_UNSPECIFIED;
                 frame = popFrame(&stack);
                 break;
+            }
 
             case AST_PARAM:
                 retVal.type = VAR;
                 retVal.value.retString = frame->currentNode->data.parameter.id;
+                retVal.varId = 0;
                 retVal.dataType = frame->currentNode->data.parameter.declType;
                 frame = popFrame(&stack);
                 break;
@@ -754,6 +784,7 @@ char *codeGen(Node top, Error *err) {
                 retVal.type = INT;
                 retVal.value.tempNum = frame->currentNode->data.intLiteral.value;
                 retVal.dataType = TYPE_INT;
+                retVal.varId = 0;
                 frame = popFrame(&stack);
                 break;
 
@@ -761,6 +792,7 @@ char *codeGen(Node top, Error *err) {
                 retVal.type = REAL;
                 retVal.value.real = frame->currentNode->data.doubleLiteral.value;
                 retVal.dataType = TYPE_DOUBLE;
+                retVal.varId = 0;
                 frame = popFrame(&stack);
                 break;
 
@@ -768,12 +800,14 @@ char *codeGen(Node top, Error *err) {
                 retVal.type = STR;
                 retVal.value.retString = frame->currentNode->data.stringLiteral.string;
                 retVal.dataType = TYPE_STRING;
+                retVal.varId = 0;
                 frame = popFrame(&stack);
                 break;
 
             case AST_UNIT:
                 retVal.type = NIL;
                 retVal.dataType = TYPE_UNIT;
+                retVal.varId = 0;
                 frame = popFrame(&stack);
                 break;
 
@@ -831,6 +865,7 @@ char *codeGen(Node top, Error *err) {
                         retVal.dataType = (op == TOKEN_EQ || op == TOKEN_NEQ || op == TOKEN_LT ||
                                            op == TOKEN_LTE || op == TOKEN_GT || op == TOKEN_GTE)
                                           ? TYPE_BOOL : frame->left.dataType;
+                        retVal.varId = 0;
                         frame = popFrame(&stack);
                         break;
                     }
@@ -860,6 +895,7 @@ char *codeGen(Node top, Error *err) {
                         }
                         retVal.type = TEMP;
                         retVal.value.tempNum = (int64_t)frame->reserve;
+                        retVal.varId = 0;
                         break;
 
                     default:
@@ -921,6 +957,7 @@ char *codeGen(Node top, Error *err) {
                         appendF(&output, "label $brk%u\n", frame->reserve);
                         retVal.type = NIL;
                         retVal.dataType = TYPE_UNIT;
+                        retVal.varId = 0;
                         frame = popFrame(&stack);
                         break;
                 }
@@ -948,6 +985,7 @@ char *codeGen(Node top, Error *err) {
                                 frame->reserve, frame->reserve);
                         retVal.type = NIL;
                         retVal.dataType = TYPE_UNIT;
+                        retVal.varId = 0;
                         frame = popFrame(&stack);
                         break;
                 }

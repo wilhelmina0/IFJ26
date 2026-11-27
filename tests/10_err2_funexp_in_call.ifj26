@@ -1,0 +1,4 @@
+import ifj26.*
+def f(x: Int): Int = x
+@main def run(): Unit =
+    val r = f(1 + 2)

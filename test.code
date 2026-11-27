@@ -1,0 +1,172 @@
+.IFJcode26
+createframe
+call $_run
+exit int@0
+label $$print
+pushframe
+defvar LF@v
+pops LF@v
+defvar LF@t
+type LF@t LF@v
+jumpifeq $$print_nil LF@t string@nil
+write LF@v
+jump $$print_end
+label $$print_nil
+write string@()
+label $$print_end
+pushs nil@nil
+popframe
+return
+label $$readLine
+pushframe
+defvar LF@r
+read LF@r string
+jumpifneq $$readLine_ok LF@r nil@nil
+move LF@r string@
+label $$readLine_ok
+pushs LF@r
+popframe
+return
+label $$readInt
+pushframe
+defvar LF@r
+read LF@r int
+jumpifneq $$readInt_ok LF@r nil@nil
+move LF@r int@0
+label $$readInt_ok
+pushs LF@r
+popframe
+return
+label $$readDouble
+pushframe
+defvar LF@r
+read LF@r float
+jumpifneq $$readDouble_ok LF@r nil@nil
+move LF@r float@0x0p+0
+label $$readDouble_ok
+pushs LF@r
+popframe
+return
+label $$toStr
+pushframe
+defvar LF@v
+pops LF@v
+defvar LF@t
+type LF@t LF@v
+jumpifeq $$toStr_int LF@t string@int
+jumpifeq $$toStr_float LF@t string@float
+jumpifeq $$toStr_bool LF@t string@bool
+jumpifeq $$toStr_nil LF@t string@nil
+pushs LF@v
+jump $$toStr_end
+label $$toStr_int
+int2str LF@v LF@v
+pushs LF@v
+jump $$toStr_end
+label $$toStr_float
+float2str LF@v LF@v
+pushs LF@v
+jump $$toStr_end
+label $$toStr_bool
+jumpifeq $$toStr_true LF@v bool@true
+pushs string@false
+jump $$toStr_end
+label $$toStr_true
+pushs string@true
+jump $$toStr_end
+label $$toStr_nil
+pushs string@()
+label $$toStr_end
+popframe
+return
+label $$toInt
+pushframe
+defvar LF@v
+pops LF@v
+float2int LF@v LF@v
+pushs LF@v
+popframe
+return
+label $$strLength
+pushframe
+defvar LF@v
+pops LF@v
+strlen LF@v LF@v
+pushs LF@v
+popframe
+return
+label $$substr
+pushframe
+defvar LF@e
+pops LF@e
+defvar LF@b
+pops LF@b
+defvar LF@s
+pops LF@s
+defvar LF@len
+strlen LF@len LF@s
+defvar LF@c
+lt LF@c LF@b int@0
+jumpifeq $$substr_err LF@c bool@true
+lt LF@c LF@e int@0
+jumpifeq $$substr_err LF@c bool@true
+gt LF@c LF@b LF@e
+jumpifeq $$substr_err LF@c bool@true
+lt LF@c LF@b LF@len
+jumpifeq $$substr_err LF@c bool@false
+gt LF@c LF@e LF@len
+jumpifeq $$substr_err LF@c bool@true
+defvar LF@r
+move LF@r string@
+defvar LF@ch
+label $$substr_loop
+jumpifeq $$substr_end LF@b LF@e
+getchar LF@ch LF@s LF@b
+concat LF@r LF@r LF@ch
+add LF@b LF@b int@1
+jump $$substr_loop
+label $$substr_end
+pushs LF@r
+popframe
+return
+label $$substr_err
+exit int@40
+label $$ord
+pushframe
+defvar LF@i
+pops LF@i
+defvar LF@s
+pops LF@s
+defvar LF@len
+strlen LF@len LF@s
+defvar LF@c
+lt LF@c LF@i int@0
+jumpifeq $$ord_bad LF@c bool@true
+lt LF@c LF@i LF@len
+jumpifeq $$ord_bad LF@c bool@false
+stri2int LF@c LF@s LF@i
+pushs LF@c
+popframe
+return
+label $$ord_bad
+pushs int@-1
+popframe
+return
+label $$chr
+pushframe
+defvar LF@v
+pops LF@v
+int2char LF@v LF@v
+pushs LF@v
+popframe
+return
+label $_run
+pushframe
+defvar LF@T0
+createframe
+pushs string@ok\010
+call $$print
+pops LF@T0
+pushs nil@nil
+popframe
+return

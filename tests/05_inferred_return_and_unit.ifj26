@@ -1,0 +1,13 @@
+import ifj26.*
+def addOne(x: Int) = x + 1
+
+def sayHi(): Unit =
+    print("hi\n")
+    return
+
+@main def run(): Unit =
+    sayHi()
+    val y = addOne(41)
+    val sy = toStr(y)
+    print(sy)
+    print("\n")

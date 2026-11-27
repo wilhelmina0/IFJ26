@@ -1,0 +1,4 @@
+import ifj26.*
+def takeInt(x: Int): Int = x
+@main def run(): Unit =
+    val a = takeInt("hello")

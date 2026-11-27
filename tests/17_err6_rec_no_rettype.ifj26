@@ -1,0 +1,10 @@
+import ifj26.*
+def loop(n: Int) =
+    if (n <= 0) then
+        return 0
+    else
+        val m = n - 1
+        return loop(m)
+
+@main def run(): Unit =
+    val r = loop(3)

@@ -1,6 +1,0 @@
-import ifj26.*
-/* vnejsi /* vnitrni */ porad komentar */
-@main def edge(): Unit =
-    val a = 1e-5
-    val b = 2.5E+3d
-    val c = .5

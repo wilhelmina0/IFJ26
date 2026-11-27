@@ -1,0 +1,3 @@
+import ifj26.*
+def helper(): Unit =
+    print("no main\n")

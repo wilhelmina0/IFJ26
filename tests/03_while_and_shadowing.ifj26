@@ -1,0 +1,13 @@
+import ifj26.*
+@main def run(): Unit =
+    var x = 100
+    var i = 0
+    while (i < 3) do
+        var x = i * 10
+        val sx = toStr(x)
+        print(sx)
+        print(" ")
+        i = i + 1
+    val sOuter = toStr(x)
+    print(sOuter)
+    print("\n")

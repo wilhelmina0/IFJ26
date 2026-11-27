@@ -1,0 +1,21 @@
+import ifj26.*
+@main def run(): Unit =
+    val s = "Ahoj IFJ\n"
+    val len = strLength(s)
+    val sub = substr(s, 0, 4)
+    val code = ord(sub, 0)
+    val ch = chr(66)
+    val back = toInt(3.9)
+    val sLen = toStr(len)
+    print(sLen)
+    print(" ")
+    print(sub)
+    print(" ")
+    val sCode = toStr(code)
+    print(sCode)
+    print(" ")
+    print(ch)
+    print(" ")
+    val sBack = toStr(back)
+    print(sBack)
+    print("\n")

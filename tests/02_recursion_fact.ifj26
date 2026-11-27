@@ -1,0 +1,14 @@
+import ifj26.*
+def fact(n: Int): Int =
+    if (n <= 1) then
+        return 1
+    else
+        val prev = n - 1
+        val sub = fact(prev)
+        return n * sub
+
+@main def run(): Unit =
+    val res = fact(5)
+    val s = toStr(res)
+    print(s)
+    print("\n")

@@ -44,8 +44,14 @@ static inline void handleError(Error *err, ErrorCode code, const char *message, 
         case SUCCESS:
             return;
         case LEX_ERROR:
-            case SYN_ERROR:
+        case SYN_ERROR:
+        case SEM_ERROR_UNDEFINED:
+        case SEM_ERROR_REDEFINED:
+        case SEM_ERROR_NOMATCH:
+        case SEM_ERROR_VAL:
         case INTERNAL_ERROR:
+        case SEM_ERROR_OTHER:
+        case SEM_ERROR_INVALID:
             break;
 
         default:

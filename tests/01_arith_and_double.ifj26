@@ -1,0 +1,20 @@
+import ifj26.*
+@main def run(): Unit =
+    val a = 10
+    val b = 3
+    val sum = a + b
+    val divInt = a / b
+    val mix = a + 2.5
+    val divFloat = 5 / 2.0
+    val s1 = toStr(sum)
+    print(s1)
+    print("\n")
+    val s2 = toStr(divInt)
+    print(s2)
+    print("\n")
+    val s3 = toStr(mix)
+    print(s3)
+    print("\n")
+    val s4 = toStr(divFloat)
+    print(s4)
+    print("\n")

@@ -1,4 +1,0 @@
-import ifj26.*
-/* tohle nikdo nezavrel
-@main def f(): Unit =
-    ()
