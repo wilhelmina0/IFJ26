@@ -13,7 +13,7 @@
 #ifndef SEM_INIT_H
 #define SEM_INIT_H
 
-#include "../error.h"
+#include "error.h"
 
 typedef struct Node Node;
 
