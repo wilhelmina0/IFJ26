@@ -39,17 +39,28 @@ static inline void printError(Error *err) {
 
 // inline so there is no need for error.c
 static inline void handleError(Error *err, ErrorCode code, const char *message, int line) {
-    Error error;
-    error.code = code;
-    error.message = message;
-    error.line = line;
 
-    if (code == INTERNAL_ERROR) {
-        printError(&error);
-        exit((int)code);
+    switch (code) {
+        case SUCCESS:
+            return;
+        case LEX_ERROR:
+            case SYN_ERROR:
+        case INTERNAL_ERROR:
+            break;
+
+        default:
+            code = INTERNAL_ERROR;
+            message = "unknown error";
+            break;
     }
 
-    *err = error;
+    // Error error;
+    err->code = code;
+    err->message = message;
+    err->line = line;
+
+    printError(err);
+    exit((int)code);
 }
 
 #endif //ERROR_H

@@ -96,7 +96,8 @@ struct Node{
          // FUNCTION, PARAM, BLOCK, CALL
          struct {
              char *id;
-             bool main;
+             bool isMain;
+             // main -> isMain
              List params;
              Node *body;
              DeclType returnType;

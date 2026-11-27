@@ -141,6 +141,11 @@ void parserInit(Parser *parser) {
 void synClean(Parser *parser) {
     freeToken(&parser->previousToken);
     freeToken(&parser->currentToken);
+
+    if (parser->fortuneTell) {
+        freeToken(&parser->fortune);
+        parser->fortuneTell = false;
+    }
 }
 
 /**
@@ -152,15 +157,14 @@ bool parseNext(Parser *parser){
     freeToken(&parser->previousToken);
 
     parser->previousToken = parser->currentToken;
-    if (parser->fortuneTell != true) {
+    if (!parser->fortuneTell) {
         parser->currentToken = nextToken(&parser->error);
-        return true;
+    } else {
+        parser->currentToken = parser->fortune;
+        parser->fortuneTell = false;
     }
 
-    parser->currentToken = parser->fortune;
-    parser->fortuneTell = false;
-
-    return false;
+    return true;
 }
 
 // parser utils
@@ -289,8 +293,8 @@ Node *parseProgram(Parser *parser) {
     } while (checkType(parser, TOKEN_KW_DEF) || checkType(parser, TOKEN_ANNOTATION_MAIN));
 
     if(!checkType(parser, TOKEN_EOF)) {
-        handleError(&parser->error, SYN_ERROR, "Expected end of file", parser->currentToken.lineNumber);
         destroyAST(program);
+        handleError(&parser->error, SYN_ERROR, "Expected end of file", parser->currentToken.lineNumber);
         return NULL;
     }
 
@@ -327,6 +331,7 @@ Node *parseLiteral(Parser *parser) {
     Node *literal = createAST(type, token->lineNumber);
     if (!literal) {
         handleError(&parser->error, INTERNAL_ERROR, "Allocation of literal AST node failed", parser->currentToken.lineNumber);
+        return NULL;
     }
 
     switch (type) {
@@ -341,8 +346,8 @@ Node *parseLiteral(Parser *parser) {
         case AST_STRING:
             literal->data.stringLiteral.string = copyStr(token->val.stringValue);
             if(!literal->data.stringLiteral.string) {
-                handleError(&parser->error, INTERNAL_ERROR, "Allocation of string copy AST node failed", parser->currentToken.lineNumber);
                 destroyAST(literal);
+                handleError(&parser->error, INTERNAL_ERROR, "Allocation of string copy AST node failed", parser->currentToken.lineNumber);
                 return NULL;
             }
             break;
@@ -362,8 +367,8 @@ Node *parseLiteral(Parser *parser) {
  * @return id node on success else NULL
  */
 Node *parseId(Parser *parser) {
-    if(!checkType(parser, TOKEN_ID)) {
-        handleError(&parser->error, SYN_ERROR, "Expected 'ifj26' after 'import'", parser->currentToken.lineNumber);
+    if(!checkType(parser, TOKEN_ID) || checkType(parser, TOKEN_UNDERSCORE)) {
+        handleError(&parser->error, SYN_ERROR, "Expected 'id'", parser->currentToken.lineNumber);
         return NULL;
     }
     int line = parser->currentToken.lineNumber;
@@ -376,12 +381,16 @@ Node *parseId(Parser *parser) {
 
     id->data.identifier.id = copyStr(parser->currentToken.val.stringValue);
     if (!id->data.identifier.id) {
-        handleError(&parser->error, INTERNAL_ERROR, "Failed to make a copy of identifier", parser->currentToken.lineNumber);
         destroyAST(id);
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to make a copy of identifier", parser->currentToken.lineNumber);
         return NULL;
     }
 
-    parseNext(parser);
+    if (!parseNext(parser)) {
+        destroyAST(id);
+        handleError(&parser->error, parser->error.code, parser->error.message, parser->error.line);
+        return NULL;
+    }
     return id;
 }
 
@@ -395,10 +404,16 @@ Node *parseId(Parser *parser) {
  */
 Node *parseCall(Parser *parser, Node *id) {
 
+    if (!id || id->type != AST_IDENTIFIER ) {
+        handleError(&parser->error, INTERNAL_ERROR, "Expected identifier node", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
     int line = id->line;
     Node *call = createAST(AST_CALL, line);
 
     if (!call) {
+        destroyAST(id);
         handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'call' node", parser->currentToken.lineNumber);
         return NULL;
     }
@@ -409,8 +424,8 @@ Node *parseCall(Parser *parser, Node *id) {
 
     if (!call->data.call.id) {
         // error id is null
-        handleError(&parser->error, SYN_ERROR, "Identifier is NULL", line);
         destroyAST(call);
+        handleError(&parser->error, INTERNAL_ERROR, "Identifier is NULL", line);
         return NULL;
     }
 
@@ -422,13 +437,7 @@ Node *parseCall(Parser *parser, Node *id) {
     // if u do not find ) -> expect params
     if (!checkType(parser, TOKEN_RPAREN)) {
         do {
-            Node *arg;
-            // temporary solution for nested function call
-            if (checkType(parser, TOKEN_ID)) {
-                arg = parseTerm(parser);
-            } else {
-                arg = parseLiteral(parser);
-            }
+            Node *arg = parseExpression(parser);
 
             if (!arg) {
                 destroyAST(call);
@@ -450,7 +459,7 @@ Node *parseCall(Parser *parser, Node *id) {
                 destroyAST(arg);
                 destroyAST(call);
                 handleError(&parser->error, INTERNAL_ERROR, "Failed to add argument", line);
-                return false;
+                return NULL;
             }
 
             /* old varianta pres children
@@ -481,9 +490,9 @@ static const char precedenceTable[9][9] = {
     // = ... insert input and shift
     // E ... end state
 
-    // INPUT: neg operand add_sub mul_div lparen rparen comp equal end
+    // INPUT:   unary operand add_sub mul_div lparen rparen comp equal end
     // ON STACK:
-    // neg
+    // unary
     {'<', '<', '>', '>', '<', '>', '>', '>', '>'},
     // operand
     {'!', '!', '>', '>', '!', '>', '>', '>', '>'},
@@ -536,10 +545,11 @@ bool shiftStack(Parser *parser, Stack *stack, char action, OpSymbol symbol, size
     }
 
     if (!pushStack(stack, item)) {
-        handleError(&parser->error, INTERNAL_ERROR, "Failed to push element", item.line);
         if (item.node) {
             destroyAST(item.node);
         }
+
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to push element", item.line);
         return false;
     }
 
@@ -598,7 +608,7 @@ bool reduceStack(Parser *parser, Stack *stack) {
         return true;
     }
 
-    if (count == 2 && stack->el[borderIdx + 1].symbol == NEG && stack->el[borderIdx + 2].symbol == EXPR) {
+    if (count == 2 && stack->el[borderIdx + 1].symbol == UNARY && stack->el[borderIdx + 2].symbol == EXPR) {
         StackEl *sign = &stack->el[borderIdx + 1];
         StackEl *num = &stack->el[borderIdx + 2];
 
@@ -691,14 +701,8 @@ Node *parseExpression(Parser *parser) {
         switch (token->type) {
             case TOKEN_PLUS:
             case TOKEN_MINUS:
-                symbol = oprWanted ? NEG : ADD_SUB; // neg ma stejnou precedenci jako unarni + a -
+                symbol = oprWanted ? UNARY : ADD_SUB; // unary or binary operator?
                 break;
-            // todo: lex chybi ! token
-            /*
-                case TOKEN_NOT:
-                symbol = NEG;
-                break;
-            */
             case TOKEN_MUL:
             case TOKEN_DIV:
                 symbol = MUL_DIV;
@@ -735,14 +739,15 @@ Node *parseExpression(Parser *parser) {
                 break;
 
             default:
-                // can not resolve token -> error
-                handleError(&parser->error, SYN_ERROR, "Invalid token", token->lineNumber);
-
                 // stack cleanup
                 for(size_t i = 0; i < stack.top; i++ ) {
                     if (stack.el[i].node) destroyAST(stack.el[i].node);
                 }
                 free(stack.el);
+
+                // can not resolve token -> error
+                handleError(&parser->error, SYN_ERROR, "Invalid token", token->lineNumber);
+
                 return NULL;
         }
 
@@ -797,14 +802,14 @@ Node *parseExpression(Parser *parser) {
                     return result;
                 }
             default:
-                // chyba uklid
-                handleError(&parser->error, SYN_ERROR, "Invalid token", token->lineNumber);
-
                 // stack cleanup
                 for(size_t i = 0; i < stack.top; i++ ) {
                     if (stack.el[i].node) destroyAST(stack.el[i].node);
                 }
                 free(stack.el);
+
+                // chyba uklid
+                handleError(&parser->error, SYN_ERROR, "Invalid token", token->lineNumber);
                 return NULL;
         }
     }
@@ -820,13 +825,19 @@ Node *parseExpression(Parser *parser) {
  * @return assign node on success else NULL
  */
 Node *parseAssignment(Parser *parser,Node *id) {
+
+    if (!id || id->type != AST_IDENTIFIER ) {
+        handleError(&parser->error, INTERNAL_ERROR, "Expected identifier node", parser->currentToken.lineNumber);
+        return NULL;
+    }
+
     Token *token = &parser->currentToken;
     int line = token->lineNumber;
 
     Node *assign = createAST(AST_ASSIGN, line);
     if (!assign) {
-        handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'assign' node", line);
         destroyAST(id);
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'assign' node", line);
         return NULL;
     }
 
@@ -836,8 +847,8 @@ Node *parseAssignment(Parser *parser,Node *id) {
     destroyAST(id);
 
     if (!assign->data.assignment.name) {
-        handleError(&parser->error, SYN_ERROR, "Identifier is NULL", line);
         destroyAST(assign);
+        handleError(&parser->error, INTERNAL_ERROR, "Identifier is NULL", line);
         return NULL;
     }
 
@@ -901,17 +912,20 @@ Node *parseBlock(Parser *parser) {
     int line = parser->currentToken.lineNumber;
 
     if (!want(parser, TOKEN_INDENT, "Expected indentation")) {
-        handleError(&parser->error, SYN_ERROR, "Expected indentation", parser->currentToken.lineNumber);
         return NULL;
     }
 
     Node *block = createAST(AST_BLOCK, line);
-    if (!block) return NULL;
+    if (!block) {
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'block' node", line);
+        return NULL;
+
+    }
 
     while (!checkType(parser, TOKEN_DEDENT)) {
         if (checkType(parser, TOKEN_EOF)) {
-            handleError(&parser->error, SYN_ERROR, "Expected eof", parser->currentToken.lineNumber);
             destroyAST(block);
+            handleError(&parser->error, SYN_ERROR, "Unexpected EOF, expected dedent first", parser->currentToken.lineNumber);
             return NULL;
         }
 
@@ -933,6 +947,8 @@ Node *parseBlock(Parser *parser) {
 
         if (!insertStatement) {
             destroyAST(statement);
+            destroyAST(block);
+            handleError(&parser->error, INTERNAL_ERROR, "Failed to insert statement", line);
             return NULL;
         }
     }
@@ -944,11 +960,10 @@ Node *parseBlock(Parser *parser) {
 // FUNCTION
 Node *parseFunction(Parser *parser){
 
-    bool main = false;
-    char *id = NULL;
+    bool isMain = false;
 
     if (same(parser, TOKEN_ANNOTATION_MAIN)){
-        main = true;
+        isMain = true;
         // id = "main";
     }
 
@@ -967,7 +982,7 @@ Node *parseFunction(Parser *parser){
         return NULL;
     }
 
-    fun->data.function.main = main;
+    fun->data.function.isMain = isMain;
     fun->data.function.returnType = TYPE_UNSPECIFIED;
     fun->data.function.id = copyStr(parser->currentToken.val.stringValue);
 
@@ -1019,13 +1034,17 @@ bool parseParams(Parser *parser, List *params) {
         }
 
         Node *param = createAST(AST_PARAM, parser->currentToken.lineNumber);
-        if (!param) return false;
+        if (!param) {
+            handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'param'", parser->currentToken.lineNumber);
+            return false;
+        }
 
         param->data.parameter.symbol = NULL;
         param->data.parameter.id = copyStr(parser->currentToken.val.stringValue);
 
         if (!param->data.parameter.id) {
             destroyAST(param);
+            handleError(&parser->error, INTERNAL_ERROR, "Failed to allocate 'param' id", parser->currentToken.lineNumber);
             return false;
         }
         parseNext(parser);
@@ -1051,6 +1070,7 @@ bool parseParams(Parser *parser, List *params) {
 
         if (!insertParam) {
             destroyAST(param);
+            handleError(&parser->error, INTERNAL_ERROR, "Failed to insert param", parser->currentToken.lineNumber);
             return false;
         }
 
@@ -1121,7 +1141,8 @@ Node *parseDecl(Parser *parser) {
     decl->data.varDeclaration.id = copyStr(parser->currentToken.val.stringValue);
     if (!decl->data.varDeclaration.id) {
         destroyAST(decl);
-        handleError(&parser->error, SYN_ERROR, "Failed to copy variable id", parser->currentToken.lineNumber);
+        handleError(&parser->error, INTERNAL_ERROR, "Failed to copy variable id", parser->currentToken.lineNumber);
+        return NULL;
     }
     decl->data.varDeclaration.mutable = changes;
     decl->data.varDeclaration.declType = TYPE_UNSPECIFIED;
@@ -1175,6 +1196,7 @@ Node *parseReturn(Parser *parser) {
 
 // WHILE
 Node *parseWhile(Parser *parser) {
+    int line = parser->currentToken.lineNumber;
     parseNext(parser); // consumes while kw
 
     Node *cond = parseExpression(parser);
@@ -1191,7 +1213,7 @@ Node *parseWhile(Parser *parser) {
         return NULL;
     }
 
-    Node *cycle = createAST(AST_WHILE, parser->currentToken.lineNumber);
+    Node *cycle = createAST(AST_WHILE, line);
     if (!cycle) {
         destroyAST(cond);
         destroyAST(body);
@@ -1268,10 +1290,9 @@ TokenType statementFortune(Parser *parser) {
 // STATEMENT
 Node *parseStatement(Parser *parser) {
     TokenType type = parser->currentToken.type;
-    Node *statement;
+    Node *statement = NULL;
 
     switch (type) {
-        case LPAREN:
         case TOKEN_PLUS:
         case TOKEN_MINUS:
         case TOKEN_INT_LITERAL:
