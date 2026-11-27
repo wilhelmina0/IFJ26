@@ -1,29 +1,18 @@
 /**
- * @file semantics.c
- * @brief Semantic analysis
- *
- * Checks the AST in two passes and stores semantic information
- * needed by the code generator.
+ * @file sem.c
+ * @brief semantic analysis
  *
  * @authors
  * - Radim Winter
- *
- * @par AI prompt (English summary)
- * Adapt my semantics and symbol table to the supplied project materials and
- * colleague feedback. Use a balanced tree, use the actual AST interface,
- * and keep simple camelCase code with English documentation.
- * The original user wording is recorded in AI_USAGE.md.
- *
- * @note AI-assisted reference code (ChatGPT); see AI_USAGE.md for the prompt.
  */
 
-#include "semantics.h"
+#include "sem.h"
 #include "ast.h"
 #include "symtable.h"
 #include <stdlib.h>
 #include <string.h>
 
-// One symbol table per block, linked to its parent scope.
+// local symbol tables linked to outer scopes
 typedef struct Scope {
     SymTable *table;
     struct Scope *parent;
@@ -31,7 +20,6 @@ typedef struct Scope {
 
 typedef enum { FUNCTION_NEW, FUNCTION_CHECKING, FUNCTION_CHECKED } FunctionState;
 
-// Function analysis state, kept outside the AST.
 typedef struct {
     Node *node;
     FunctionState state;
@@ -46,15 +34,18 @@ typedef struct {
     Scope *scope;
     Node *function;
     size_t nextId;
-    // Stack of open call graph components (Tarjan algorithm).
+
+    // function stack for detecting recursive groups
     FunctionInfo **componentStack;
     size_t componentCount, nextIndex;
 } AnalysisState;
 
 typedef struct {
     DeclType type;
-    bool returns;  // Whether the final statement ends in return on all branches.
-    bool unitTail; // Whether all branches of a trailing if produce Unit.
+    // explicit return on every branch
+    bool returns;
+    // unit result at the end of every branch
+    bool unitTail;
 } Flow;
 
 typedef struct {
@@ -64,6 +55,7 @@ typedef struct {
     DeclType params[3];
 } Builtin;
 
+// names, return types and parameters of built-ins
 static const Builtin builtins[] = {
     {"print", TYPE_UNIT, 1, {TYPE_ANY}},
     {"readLine", TYPE_STRING, 0, {TYPE_UNSPECIFIED}},
@@ -82,19 +74,12 @@ static Flow checkStatement(AnalysisState *state, Error *error, Node *node);
 static Flow checkBlock(AnalysisState *state, Error *error, Node *node, bool newScope);
 static void checkFunction(AnalysisState *state, Error *error, FunctionInfo *info);
 
-/** @brief Checks whether a type is available in the basic language. */
 static bool isUserType(DeclType type) {
     return type == TYPE_INT || type == TYPE_DOUBLE || type == TYPE_STRING || type == TYPE_UNIT;
 }
 
-/** @brief Checks whether a type is numeric. */
 static bool isNumeric(DeclType type) { return type == TYPE_INT || type == TYPE_DOUBLE; }
 
-/**
- * @brief Checks whether a value matches the expected type.
- *
- * Marks an Int to Double conversion in the AST when needed.
- */
 static bool compatible(Node *value, DeclType actual, DeclType expected) {
     if (!value || actual == TYPE_UNSPECIFIED) {
         return false;
@@ -103,17 +88,13 @@ static bool compatible(Node *value, DeclType actual, DeclType expected) {
         return true;
     }
     if (actual == TYPE_INT && expected == TYPE_DOUBLE) {
+        // mark int to double conversion for the generator
         value->convertToDouble = true;
         return true;
     }
     return false;
 }
 
-/**
- * @brief Creates a symbol table for a new scope.
- *
- * Links the new scope to its parent. The caller owns and activates the scope.
- */
 static bool initScope(AnalysisState *state, Error *error, Scope *scope, Node *node) {
     scope->table = symtableCreate();
     if (!scope->table) {
@@ -124,12 +105,8 @@ static bool initScope(AnalysisState *state, Error *error, Scope *scope, Node *no
     return true;
 }
 
-/**
- * @brief Looks up the nearest visible variable.
- *
- * Searches the current scope first, then continues through parent scopes.
- */
 static bool findVariable(AnalysisState *state, const char *name, Symbol *symbol) {
+    // search from the current scope towards outer scopes
     for (Scope *scope = state->scope; scope; scope = scope->parent) {
         if (symtableFind(scope->table, name, symbol)) {
             return true;
@@ -138,12 +115,6 @@ static bool findVariable(AnalysisState *state, const char *name, Symbol *symbol)
     return false;
 }
 
-/**
- * @brief Inserts a variable into the current scope.
- *
- * Stores its type, mutability and identifier, and writes the identifier to the AST.
- * The symbol table rejects duplicate names in the same scope.
- */
 static void defineVariable(AnalysisState *state, Error *error, Node *node, const char *name, DeclType type,
                            bool mutable) {
     if (!node || !name || !state->scope || state->nextId == 0) {
@@ -162,6 +133,7 @@ static void defineVariable(AnalysisState *state, Error *error, Node *node, const
         free(owned);
         handleError(error, code, "Cannot insert name into current scope.", node ? node->line : 0);
     } else {
+        // symbol record owned by the declaration node
         Symbol **slot = node->type == AST_PARAM ? &node->data.parameter.symbol
                                                 : &node->data.varDeclaration.symbol;
         free(*slot);
@@ -171,11 +143,6 @@ static void defineVariable(AnalysisState *state, Error *error, Node *node, const
     }
 }
 
-/**
- * @brief Checks whether a node is a valid argument in the basic language.
- *
- * Accepts identifiers, literals and signed numeric literals.
- */
 static bool isTerm(const Node *node) {
     if (!node) {
         return false;
@@ -190,12 +157,6 @@ static bool isTerm(const Node *node) {
             node->data.unary.operand->type == AST_DOUBLE);
 }
 
-/**
- * @brief Checks a function call and its arguments.
- *
- * Resolves the function and checks the argument count and types.
- * Analyzes the called function when its return type is not known yet.
- */
 static DeclType checkCall(AnalysisState *state, Error *error, Node *node) {
     const char *name = node->data.call.id;
     if (!name) {
@@ -210,6 +171,7 @@ static DeclType checkCall(AnalysisState *state, Error *error, Node *node) {
     Node *function = NULL;
     FunctionInfo *info = NULL;
     const Builtin *builtin = NULL;
+    // look up user functions before built-ins
     if (symtableFind(state->functions, name, &symbol)) {
         node->symbolId = symbol.id;
         node->data.call.symbol = symbol.declaration->data.function.symbol;
@@ -232,6 +194,7 @@ static DeclType checkCall(AnalysisState *state, Error *error, Node *node) {
         handleError(error, SEM_ERROR_INVALID, "Invalid number of arguments.", node ? node->line : 0);
         return TYPE_UNSPECIFIED;
     }
+    // check argument form and expected parameter types
     ListNode *argument = node->data.call.args.first;
     ListNode *parameter = function ? function->data.function.params.first : NULL;
     for (size_t i = 0; i < count && error->code == SUCCESS; ++i) {
@@ -256,6 +219,7 @@ static DeclType checkCall(AnalysisState *state, Error *error, Node *node) {
     if (!function) {
         return builtin->result;
     }
+    // require a declared return type for recursive calls
     if (info->state == FUNCTION_CHECKING) {
         if (function->data.function.returnType == TYPE_UNSPECIFIED) {
             handleError(error, SEM_ERROR_NOMATCH, "Recursion requires an explicit return type.", function ? function->line : 0);
@@ -276,11 +240,6 @@ static DeclType checkCall(AnalysisState *state, Error *error, Node *node) {
     return function->valueType;
 }
 
-/**
- * @brief Checks operand types of a binary expression.
- *
- * Marks numeric conversions when needed. Actual values are evaluated at runtime.
- */
 static DeclType checkBinary(AnalysisState *state, Error *error, Node *node) {
     Node *left = node->data.binary.left;
     Node *right = node->data.binary.right;
@@ -337,11 +296,6 @@ static DeclType checkBinary(AnalysisState *state, Error *error, Node *node) {
     return TYPE_UNSPECIFIED;
 }
 
-/**
- * @brief Checks an expression and stores its type in the AST.
- *
- * Resolves variable identifiers and checks whether calls are allowed here.
- */
 static DeclType checkExpression(AnalysisState *state, Error *error, Node *node, bool allowCall, bool inCondition) {
     if (error->code != SUCCESS) {
         return TYPE_UNSPECIFIED;
@@ -409,18 +363,12 @@ static DeclType checkExpression(AnalysisState *state, Error *error, Node *node, 
     return type;
 }
 
-/** @brief Checks that an if or while condition has type Boolean. */
 static void checkCondition(AnalysisState *state, Error *error, Node *node) {
     if (checkExpression(state, error, node, false, true) != TYPE_BOOL) {
         handleError(error, SEM_ERROR_NOMATCH, "Condition must have type Boolean.", node ? node->line : 0);
     }
 }
 
-/**
- * @brief Checks a return statement against the declared return type.
- *
- * Also checks return statements in unreachable code.
- */
 static Flow checkReturn(AnalysisState *state, Error *error, Node *node) {
     Flow flow = {TYPE_UNIT, true, true};
     DeclType expected = state->function->data.function.returnType;
@@ -442,11 +390,6 @@ static Flow checkReturn(AnalysisState *state, Error *error, Node *node) {
     return flow;
 }
 
-/**
- * @brief Checks one statement and updates its AST node.
- *
- * Checks a variable initializer before inserting the declaration into its scope.
- */
 static Flow checkStatement(AnalysisState *state, Error *error, Node *node) {
     Flow flow = {TYPE_UNIT, false, true};
     if (error->code != SUCCESS) {
@@ -475,6 +418,7 @@ static Flow checkStatement(AnalysisState *state, Error *error, Node *node) {
             handleError(error, SEM_ERROR_UNDEFINED, "Invalid declared type.", node ? node->line : 0);
             break;
         }
+        // check the initializer before adding the new variable
         Node *value = node->data.varDeclaration.initializer;
         DeclType actual = checkExpression(state, error, value, true, false);
         if (expected == TYPE_UNSPECIFIED) {
@@ -486,7 +430,8 @@ static Flow checkStatement(AnalysisState *state, Error *error, Node *node) {
         if (error->code == SUCCESS) {
             defineVariable(state, error, node, name, expected, node->data.varDeclaration.mutable);
         }
-        // For a declaration, valueType is the variable type, not the statement result.
+
+        // store the resolved variable type in the node
         node->valueType = expected;
         return flow;
     }
@@ -524,6 +469,7 @@ static Flow checkStatement(AnalysisState *state, Error *error, Node *node) {
         if (error->code != SUCCESS) {
             break;
         }
+        // combine return information from both branches
         Flow yes = checkBlock(state, error, node->data.ifNode.branchThen, true);
         Flow no = checkBlock(state, error, node->data.ifNode.branchElse, true);
         flow.returns = yes.returns && no.returns;
@@ -540,8 +486,9 @@ static Flow checkStatement(AnalysisState *state, Error *error, Node *node) {
         if (error->code != SUCCESS) {
             break;
         }
+        // loop body may never run, so return is not guaranteed
         (void)checkBlock(state, error, node->data.whileNode.body, true);
-        // A loop may execute zero times even if its body returns.
+
         break;
     case AST_BLOCK:
         handleError(error, SYN_ERROR, "Standalone nested blocks are not supported in basic IFJ26.", node ? node->line : 0);
@@ -555,12 +502,6 @@ static Flow checkStatement(AnalysisState *state, Error *error, Node *node) {
     return flow;
 }
 
-/**
- * @brief Checks statements in a block in source order.
- *
- * Checks unreachable statements as well. The syntactically last statement
- * determines the block result used when checking the function return type.
- */
 static Flow checkBlock(AnalysisState *state, Error *error, Node *node, bool newScope) {
     Flow flow = {TYPE_UNIT, false, true};
     if (error->code != SUCCESS) {
@@ -582,6 +523,7 @@ static Flow checkBlock(AnalysisState *state, Error *error, Node *node, bool newS
          item = item->next) {
         flow = checkStatement(state, error, *(Node **)item->data);
     }
+    // store the block result and restore the outer scope
     node->valueType = flow.type;
     state->scope = savedScope;
     if (newScope) {
@@ -590,7 +532,6 @@ static Flow checkBlock(AnalysisState *state, Error *error, Node *node, bool newS
     return flow;
 }
 
-/** @brief Checks the final result and inferred return type of a function. */
 static void checkFunctionResult(Error *error, Node *function, Node *body, Flow result) {
     if (error->code != SUCCESS) {
         return;
@@ -618,22 +559,18 @@ static void checkFunctionResult(Error *error, Node *function, Node *body, Flow r
     }
 }
 
-/**
- * @brief Finishes a call graph component and checks recursive return types.
- *
- * A cycle can include functions visited through different DFS branches.
- * The component stack keeps these functions together until their root is done.
- */
 static void checkRecursion(AnalysisState *state, Error *error, FunctionInfo *info) {
     if (info->lowLink != info->index) {
         return;
     }
+    // remove the completed function group from the stack
     size_t end = state->componentCount;
     FunctionInfo *item;
     do {
         item = state->componentStack[--state->componentCount];
         item->onStack = false;
     } while (item != info);
+    // require explicit return types in a recursive group
     if (end - state->componentCount > 1) {
         for (size_t i = state->componentCount; i < end; ++i) {
             item = state->componentStack[i];
@@ -644,12 +581,6 @@ static void checkRecursion(AnalysisState *state, Error *error, FunctionInfo *inf
     }
 }
 
-/**
- * @brief Checks a function body once and determines its return type.
- *
- * Creates a separate scope for parameters and local variables.
- * Tracks call graph components to check recursive functions.
- */
 static void checkFunction(AnalysisState *state, Error *error, FunctionInfo *info) {
     Node *function = info->node;
     if (error->code != SUCCESS || info->state == FUNCTION_CHECKED) {
@@ -660,6 +591,7 @@ static void checkFunction(AnalysisState *state, Error *error, FunctionInfo *info
     info->lowLink = info->index;
     info->onStack = true;
     state->componentStack[state->componentCount++] = info;
+    // save the caller scope and current function
     Scope *savedScope = state->scope;
     Node *savedFunction = state->function;
     FunctionInfo *savedInfo = state->current;
@@ -686,6 +618,7 @@ static void checkFunction(AnalysisState *state, Error *error, FunctionInfo *info
         checkFunctionResult(error, function, body, result);
         symtableDestroy(locals.table);
     }
+    // restore the caller state after checking the function
     state->scope = savedScope;
     state->function = savedFunction;
     state->current = savedInfo;
@@ -693,12 +626,6 @@ static void checkFunction(AnalysisState *state, Error *error, FunctionInfo *info
     checkRecursion(state, error, info);
 }
 
-/**
- * @brief Registers function signatures during the first pass.
- *
- * Checks signature types, duplicate definitions and the entry function.
- * Registering all functions first allows calls before their definitions.
- */
 static void firstPass(AnalysisState *state, Error *error, Node *program) {
     size_t mainCount = 0;
     size_t i = 0;
@@ -761,12 +688,6 @@ static void firstPass(AnalysisState *state, Error *error, Node *program) {
     }
 }
 
-/**
- * @brief Checks function bodies during the second pass.
- *
- * Checks local declarations, expressions and return types. Function bodies
- * may be visited in dependency order when inferring return types.
- */
 static void secondPass(AnalysisState *state, Error *error, Node *program) {
     for (size_t i = 0; i < program->data.program.declarations.size && error->code == SUCCESS;
          ++i) {
@@ -804,13 +725,16 @@ ErrorCode semanticsRun(Node *program, SemanticError *err) {
         }
     }
 
+    // first pass: register functions and check their headers
     if (error.code == SUCCESS) {
         firstPass(&state, &error, program);
     }
+    // second pass: check function bodies and return values
     if (error.code == SUCCESS) {
         secondPass(&state, &error, program);
     }
 
+    // release temporary tables and function tracking data
     free(state.componentStack);
     free(state.functionInfo);
     symtableDestroy(state.functions);
