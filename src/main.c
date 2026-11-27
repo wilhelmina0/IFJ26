@@ -12,13 +12,11 @@
 
 #include "lex.h"
 #include "syn.h"
-//#include "sem/init.h"
-//#include "sem/semantics.h" //will dissapear soon
-//#include "sem/symtable.h"
-//#include "gen/init.h"
+#include "sem.h"
+#include "gen.h"
 #include "error.h"
 #include "token.h"
-
+ 
 int main(void)
 {
     Parser parser;
@@ -39,24 +37,29 @@ int main(void)
 
     //do semantics
     if (parser.error.code == SUCCESS) {
-        //SemanticError semErr = {SUCCESS, 0, ""};
-        //ErrorCode semCode = semanticsRun(program, &semErr);
-        /*
+        SemanticError semErr = {SUCCESS, 0, ""};
+        ErrorCode semCode = semanticsRun(program, &semErr);
+        
         if (semCode != SUCCESS) {
             handleError( &parser.error, semCode, semErr.message ? semErr.message : "Semantic or code generation error", semErr.line);
-        }*/
+        }
     }
 
+    //generate IFJcode26
     if (parser.error.code == SUCCESS) {
-        //codeGen(*program);
+        char *code = codeGen(*program, &parser.error);
+        if (parser.error.code == SUCCESS && code != NULL) {
+            fputs(code, stdout);
+        }
+        free(code);
     }
 
-    //report errors to stderr
+    // report errors to stderr
     if (parser.error.code != SUCCESS) {
         printError(&parser.error);
     }
 
-    //release allocated resources
+    // release allocated resources
     if (program != NULL) {
         destroyAST(program);
     }
